@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WS3518x Monitor by NguyenHungA5</title>
+    <style>
+        :root {
+            /* Light theme variables */
+            --bg-color: #f0f2f5;
+            --card-bg: #ffffff;
+            --text-color: #2c3e50;
+            --text-secondary: #555;
+            --border-color: #ddd;
+            --progress-bg: #eee;
+            --progress-fill: #4CAF50;
+            --accent-color: #007bff;
+        }
+
+        [data-theme="dark"] {
+            /* Dark theme variables */
+            --bg-color: #1a1a1a;
+            --card-bg: #2d2d2d;
+            --text-color: #ffffff;
+            --text-secondary: #cccccc;
+            --border-color: #404040;
+            --progress-bg: #404040;
+            --progress-fill: #5cb85c;
+            --accent-color: #0d6efd;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            transition: all 0.3s ease;
+        }
+
+        .main-title {
+            text-align: center;
+            color: var(--text-color);
+            margin-top: 20px;
+            margin-bottom: 40px;
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        .port-container {
+            display: grid;
+            grid-template-columns: repeat(2, 300px);
+            grid-template-rows: repeat(2, auto);
+            gap: 20px;
+            padding: 20px;
+            max-width: 620px;
+            margin: auto;
+        }
+
+        .port-card {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 15px;
+            background-color: var(--card-bg);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            position: relative;
+        }
+
+        .port-card h2 {
+            margin-top: 0;
+            color: var(--text-color);
+            border-bottom: 2px solid var(--accent-color);
+            padding-bottom: 5px;
+        }
+
+        .port-info {
+            margin: 10px 0;
+        }
+
+        .port-info span {
+            font-weight: bold;
+            color: var(--text-secondary);
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: var(--progress-bg);
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background-color: var(--progress-color, #4CAF50);
+            width: 0%;
+            transition: all 0.3s ease;
+        }
+
+        .summary-container {
+            margin-top: 30px;
+            background-color: var(--card-bg);
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            width: 620px;
+        }
+
+        .summary-title {
+            color: var(--text-color);
+            border-bottom: 2px solid var(--accent-color);
+            padding-bottom: 5px;
+            margin-bottom: 15px;
+        }
+
+        .summary-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .summary-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .summary-label {
+            font-weight: bold;
+            color: var(--text-secondary);
+            margin-bottom: 5px;
+        }
+
+        .summary-value {
+            font-size: 24px;
+            color: var(--text-color);
+        }
+
+        .total-power-bar {
+            width: 100%;
+            height: 25px;
+            background-color: var(--progress-bg);
+            border-radius: 12px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .total-power-fill {
+            height: 100%;
+            background-color: var(--progress-fill);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        /* Theme switch styles */
+        .theme-switch-wrapper {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            z-index: 1000;
+        }
+
+        .theme-switch {
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+            position: relative;
+        }
+
+        .theme-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: var(--progress-bg);
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: var(--accent-color);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+
+        /* Updated warning message styles */
+        .warning-message {
+            position: fixed;
+            top: 70px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #ff9800;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            display: none;
+            z-index: 1000;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            font-weight: bold;
+        }
+
+        /* Optional: Add hover effect */
+        .warning-message:hover {
+            background-color: #f57c00;
+        }
+
+        /* Warning message styles */
+        .warning-message {
+            position: fixed;
+            top: 70px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #ff9800;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            display: none;
+            z-index: 1000;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            font-weight: bold;
+        }
+
+        /* Status indicator for each port */
+        .port-status {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: #4CAF50;
+            transition: background-color 0.3s ease;
+        }
+
+        .port-status.warning {
+            background-color: #ff9800;
+        }
+
+        .port-status.error {
+            background-color: #f44336;
+        }
+
+        .port-card {
+            position: relative;
+        }
+
+        .version-text {
+            font-size: 0.5em;
+            color: var(--text-secondary);
+            font-weight: normal;
+            vertical-align: bottom;
+            display: inline-block;
+            line-height: 1;
+        }
+
+        .source-links {
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 0.9em;
+        }
+        
+        .source-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: color 0.2s;
+            margin: 0 10px;
+            display: inline-block;
+        }
+        
+        .source-links a:hover {
+            color: var(--primary-color);
+        }
+        
+        .icon {
+            width: 24px;
+            height: 24px;
+            fill: currentColor;
+            vertical-align: middle;
+        }
+    </style>
+</head>
+<body>
+    <div id="warningMessage" class="warning-message">
+        ⚠️ Connection issues detected. Data may be outdated.
+    </div>
+
+    <div class="theme-switch-wrapper">
+        <label class="theme-switch">
+            <input type="checkbox" id="theme-toggle">
+            <span class="slider"></span>
+        </label>
+    </div>
+    <h1 class="main-title">WS3518x Monitor <span id="version" class="version-text"></span> by NguyenHungA5</h1>
+    <div class="source-links">
+        <a href="https://github.com/nguyenhunga5/SW3518Monitor" target="_blank" title="Source Code">
+            <svg class="icon" viewBox="0 0 24 24">
+                <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+            </svg>
+        </a>
+        <a href="https://www.linkedin.com/in/nguyenhunga5/" target="_blank" title="LinkedIn Profile">
+            <svg class="icon" viewBox="0 0 24 24">
+                <path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/>
+            </svg>
+        </a>
+    </div>
+    <div class="port-container">
+        <!-- Port 1 -->
+        <div class="port-card">
+            <div class="port-status" id="status1"></div>
+            <h2>Port 1</h2>
+            <div class="port-info">
+                <span>Protocol:</span> PD
+            </div>
+            <div class="port-info">
+                <span>Voltage:</span> <span id="voltage1">0</span>V
+            </div>
+            <div class="port-info">
+                <span>Current:</span> <span id="current1">0</span>A
+            </div>
+            <div class="port-info">
+                <span>Power:</span> <span id="watts1">0</span>W
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress1"></div>
+                </div>
+            </div>
+            <div class="port-info">
+                <span>Temperature:</span> <span id="temp1">0</span>°C
+            </div>
+        </div>
+
+        <!-- Port 2 -->
+        <div class="port-card">
+            <div class="port-status" id="status2"></div>
+            <h2>Port 2</h2>
+            <div class="port-info">
+                <span>Protocol:</span> QC3
+            </div>
+            <div class="port-info">
+                <span>Voltage:</span> <span id="voltage2">0</span>V
+            </div>
+            <div class="port-info">
+                <span>Current:</span> <span id="current2">0</span>A
+            </div>
+            <div class="port-info">
+                <span>Power:</span> <span id="watts2">0</span>W
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress2"></div>
+                </div>
+            </div>
+            <div class="port-info">
+                <span>Temperature:</span> <span id="temp2">0</span>°C
+            </div>
+        </div>
+
+        <!-- Port 3 -->
+        <div class="port-card">
+            <div class="port-status" id="status3"></div>
+            <h2>Port 3</h2>
+            <div class="port-info">
+                <span>Protocol:</span> PD
+            </div>
+            <div class="port-info">
+                <span>Voltage:</span> <span id="voltage3">0</span>V
+            </div>
+            <div class="port-info">
+                <span>Current:</span> <span id="current3">0</span>A
+            </div>
+            <div class="port-info">
+                <span>Power:</span> <span id="watts3">0</span>W
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress3"></div>
+                </div>
+            </div>
+            <div class="port-info">
+                <span>Temperature:</span> <span id="temp3">0</span>°C
+            </div>
+        </div>
+
+        <!-- Port 4 -->
+        <div class="port-card">
+            <div class="port-status" id="status4"></div>
+            <h2>Port 4</h2>
+            <div class="port-info">
+                <span>Protocol:</span> QC3
+            </div>
+            <div class="port-info">
+                <span>Voltage:</span> <span id="voltage4">0</span>V
+            </div>
+            <div class="port-info">
+                <span>Current:</span> <span id="current4">0</span>A
+            </div>
+            <div class="port-info">
+                <span>Power:</span> <span id="watts4">0</span>W
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress4"></div>
+                </div>
+            </div>
+            <div class="port-info">
+                <span>Temperature:</span> <span id="temp4">0</span>°C
+            </div>
+        </div>
+    </div>
+
+    <div class="summary-container">
+        <h2 class="summary-title">System Summary</h2>
+        <div class="summary-info">
+            <div class="summary-item">
+                <span class="summary-label">Total Power</span>
+                <span class="summary-value"><span id="totalPower">0</span></span>
+            </div>
+            <div class="summary-item">
+                <span class="summary-label">Module Temperature</span>
+                <span class="summary-value"><span id="moduleTemp">0</span></span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Theme switching functionality
+        const themeToggle = document.getElementById('theme-toggle');
+        
+        // Function to set theme
+        function setTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('theme', theme);
+            themeToggle.checked = theme === 'dark';
+        }
+
+        // Check for saved theme preference
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme) {
+            setTheme(savedTheme);
+        } else {
+            // Check system preference
+            if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                setTheme('dark');
+            } else {
+                setTheme('light');
+            }
+        }
+
+        // Listen for toggle changes
+        themeToggle.addEventListener('change', (e) => {
+            setTheme(e.target.checked ? 'dark' : 'light');
+        });
+
+        // Listen for system theme changes
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+            if (!localStorage.getItem('theme')) {  // Only if no manual preference is saved
+                setTheme(e.matches ? 'dark' : 'light');
+            }
+        });
+
+        // Add this function to calculate color based on percentage
+        function getColorForPercentage(percentage) {
+            // Convert percentage to a value between 0 and 1
+            const value = percentage / 100;
+            
+            // Define color stops
+            const colors = [
+                { point: 0.0, color: { r: 46, g: 201, b: 88 } },    // Green
+                { point: 0.5, color: { r: 255, g: 149, b: 0 } },    // Orange
+                { point: 1.0, color: { r: 255, g: 59, b: 48 } }     // Red
+            ];
+            
+            // Find the two colors to interpolate between
+            let startColor, endColor, startPoint, endPoint;
+            
+            for (let i = 0; i < colors.length - 1; i++) {
+                if (value >= colors[i].point && value <= colors[i + 1].point) {
+                    startColor = colors[i].color;
+                    endColor = colors[i + 1].color;
+                    startPoint = colors[i].point;
+                    endPoint = colors[i + 1].point;
+                    break;
+                }
+            }
+            
+            // If value is at or above maximum, use the last color
+            if (!startColor) {
+                return `rgb(${colors[colors.length - 1].color.r}, 
+                           ${colors[colors.length - 1].color.g}, 
+                           ${colors[colors.length - 1].color.b})`;
+            }
+            
+            // Calculate interpolation factor
+            const factor = (value - startPoint) / (endPoint - startPoint);
+            
+            // Interpolate between the two colors
+            const r = Math.round(startColor.r + factor * (endColor.r - startColor.r));
+            const g = Math.round(startColor.g + factor * (endColor.g - startColor.g));
+            const b = Math.round(startColor.b + factor * (endColor.b - startColor.b));
+            
+            return `rgb(${r}, ${g}, ${b})`;
+        }
+
+        // Update the updatePort function to include color calculation
+        function updatePort(portNum, data) {
+            const voltage = parseFloat(data.voltage);
+            const current = parseFloat(data.current);
+            
+            document.getElementById(`voltage${portNum}`).textContent = voltage.toFixed(2);
+            document.getElementById(`current${portNum}`).textContent = current.toFixed(2);
+            document.getElementById(`temp${portNum}`).textContent = data.temperature.toFixed(1);
+            
+            // Calculate power and update
+            const watts = voltage * current;
+            document.getElementById(`watts${portNum}`).textContent = watts.toFixed(1);
+            
+            // Calculate percentage (assuming max 100W)
+            const percentage = Math.min((watts / 100) * 100, 100);
+            
+            // Get progress bar element
+            const progressBar = document.getElementById(`progress${portNum}`);
+            
+            // Update width and color
+            progressBar.style.width = `${percentage}%`;
+            progressBar.style.setProperty('--progress-color', getColorForPercentage(percentage));
+        }
+
+        // Function to safely parse JSON
+        function safeJSONParse(response) {
+            return new Promise((resolve) => {
+                try {
+                    response.json()
+                        .then(data => resolve({ success: true, data }))
+                        .catch(() => resolve({ success: false, data: null }));
+                } catch {
+                    resolve({ success: false, data: null });
+                }
+            });
+        }
+
+        let lastSuccessfulUpdate = Date.now();
+        let warningShown = false;
+        const TIMEOUT_DURATION = 60000; // 1 minute timeout
+        const UPDATE_INTERVAL = 1000;   // 1 second update interval
+
+        // Function to show warning
+        function showWarning(message) {
+            const warningElement = document.getElementById('warningMessage');
+            warningElement.textContent = `⚠️ ${message}`;
+            warningElement.style.display = 'block';
+            warningShown = true;
+        }
+
+        // Function to hide warning
+        function hideWarning() {
+            const warningElement = document.getElementById('warningMessage');
+            warningElement.style.display = 'none';
+            warningShown = false;
+        }
+
+        // Function to update port status indicators
+        function updatePortStatus(portNum, status) {
+            const statusElement = document.getElementById(`status${portNum}`);
+            if (statusElement) {
+                statusElement.className = `port-status ${status}`;
+            }
+        }
+
+        // Function to check for timeout
+        function checkTimeout() {
+            const timeSinceLastUpdate = Date.now() - lastSuccessfulUpdate;
+            if (timeSinceLastUpdate > TIMEOUT_DURATION) {
+                if (!warningShown) {
+                    showWarning('No data received for over 1 minute');
+                    // Set all ports to error state
+                    for (let i = 1; i <= 4; i++) {
+                        updatePortStatus(i, 'error');
+                    }
+                }
+                return true;
+            }
+            return false;
+        }
+
+        // Modified fetchAndUpdateData function
+        async function fetchAndUpdateData() {
+            try {
+                // Add timeout to fetch
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second fetch timeout
+
+                const response = await fetch('/monitor', {
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                // Safely parse JSON
+                const { success, data } = await safeJSONParse(response);
+                if (!success || !data) {
+                    throw new Error('Invalid data received from server');
+                }
+
+                // Validate data structure
+                if (!data.ports || !Array.isArray(data.ports) || data.ports.length !== 4) {
+                    throw new Error('Invalid data format received from server');
+                }
+
+                // Update was successful
+                lastSuccessfulUpdate = Date.now();
+                hideWarning();
+
+                // Update each port
+                data.ports.forEach((port, index) => {
+                    if (port && typeof port === 'object') {
+                        updatePort(index + 1, port);
+                        updatePortStatus(index + 1, ''); // Normal state
+                    }
+                });
+
+                // Update module temperature
+                if (typeof data.moduleTemp === 'number') {
+                    document.getElementById('moduleTemp').textContent = data.moduleTemp.toFixed(1);
+                }
+
+                // Update summary
+                updateSystemSummary(data);
+
+            } catch (error) {
+                // Handle different types of errors
+                if (error.name === 'AbortError') {
+                    showWarning('Request timeout - server not responding');
+                } else {
+                    showWarning('Connection error - check server status');
+                }
+
+                // Set all ports to warning state
+                for (let i = 1; i <= 4; i++) {
+                    updatePortStatus(i, 'warning');
+                }
+
+                // Check for complete timeout
+                checkTimeout();
+            }
+        }
+
+        // Start monitoring
+        function startMonitoring() {
+            // Initial update
+            fetchAndUpdateData();
+            
+            // Regular updates
+            setInterval(fetchAndUpdateData, UPDATE_INTERVAL);
+            
+            // Regular timeout checks
+            setInterval(checkTimeout, 5000);
+        }
+
+        // Function to fetch and update firmware version
+        async function updateFirmwareVersion() {
+            try {
+                const response = await fetch('/info');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                
+                // Update the version in title and header
+                const versionNumber = data.firmware || 'Unknown';
+                const versionText = versionNumber.startsWith('v') ? versionNumber : `v${versionNumber}`;
+                document.title = `WS3518x Monitor (${versionText}) by NguyenHungA5`;
+                document.getElementById('version').textContent = versionText;
+            } catch (error) {
+                console.error('Error fetching firmware version:', error);
+                document.getElementById('version').textContent = 'v?.?.?';
+            }
+        }
+
+        // Start monitoring
+        startMonitoring();
+        // Fetch firmware version when page loads
+        updateFirmwareVersion();
+
+        // Update the summary total power bar as well
+        function updateSystemSummary(data) {
+            // Calculate total power
+            let totalPower = 0;
+            for (let i = 1; i <= 4; i++) {
+                const voltage = parseFloat(document.getElementById(`voltage${i}`).textContent);
+                const current = parseFloat(document.getElementById(`current${i}`).textContent);
+                totalPower += voltage * current;
+            }
+            
+            // Update total power display with color gradient
+            const totalPowerElement = document.getElementById('totalPower');
+            const maxPower = 400; // Assuming 400W as max power
+            const powerPercentage = Math.min(Math.max((totalPower / maxPower) * 100, 0), 100);
+            
+            // Calculate color gradient from green to red (same as temperature)
+            const hue = ((100 - powerPercentage) * 120) / 100; // 120 is green, 0 is red in HSL
+            totalPowerElement.style.color = `hsl(${hue}, 100%, 40%)`; // Using HSL for smooth transition
+            totalPowerElement.textContent = totalPower.toFixed(1) + 'W';
+            
+            // Update Module Temperature (existing code)
+            const moduleTempElement = document.getElementById('moduleTemp');
+            const moduleTemp = data.moduleTemp;
+            const tempPercentage = Math.min(Math.max((moduleTemp - 20) / (60 - 20) * 100, 0), 100);
+            moduleTempElement.style.color = `hsl(${((100 - tempPercentage) * 120) / 100}, 100%, 40%)`;
+            moduleTempElement.textContent = moduleTemp.toFixed(1) + '°C';
+        }
+    </script>
+</body>
+</html>

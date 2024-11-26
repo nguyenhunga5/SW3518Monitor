@@ -15,6 +15,7 @@
 #include <DNSServer.h>
 
 #include "defines.h"
+#include "PortItem.h"
 
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
@@ -34,6 +35,9 @@ AsyncWebServer *server;
 AsyncWiFiManager *wm = nullptr; // global wm instance
 DNSServer *dns;
 
+// Create an array of ports (global variable)
+PortItem ports[4];
+
 // Helper function for changing TCA output channel
 void tcaselect(uint8_t channel) {
   if (channel > 7) return;
@@ -50,6 +54,22 @@ void setupI2C();
 void setup() {
   Serial.begin(115200);
  
+ if (!LittleFS.begin()) {
+      Serial.println("LittleFS mount failed");
+      return;
+  } else {
+      Serial.println("Little FS Mounted Successfully");
+      File root = LittleFS.open("/", "r");
+      File file = root.openNextFile();
+
+      while (file) {
+          Serial.print("FILE: ");
+          Serial.println(file.name());
+
+          file = root.openNextFile();
+      }
+  }
+  
   byte error, address;
   int nDevices;
  
@@ -118,11 +138,24 @@ void setup() {
 }
 
 void checkTemperature();
+void updatePortValues();
+
+float readVoltage(int port);
+
+float readCurrent(int port);
+
+float readTemp(int port);
 
 void loop() {
-  MDNS.update();
-  checkTemperature();
-  ElegantOTA.loop();
+    static unsigned long lastUpdate = 0;
+    if (millis() - lastUpdate > 1000) {  // Update every second
+        lastUpdate = millis();
+        updatePortValues();
+    }
+    
+    MDNS.update();
+    checkTemperature();
+    ElegantOTA.loop();
 }
 
 // Ref: https://esp8266tutorials.blogspot.com/2016/09/esp8266-ntc-temperature-thermistor.html
@@ -138,9 +171,66 @@ double Thermister(int val) {
 
 }
 
-void displayInfo();
+// Add this global variable at the top with other globals
+unsigned int scrollPosition = 0;
+unsigned long lastScrollTime = 0;
 
-uint lastTemperature = 0;
+void displayInfo() {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  
+  // Header with scrolling text
+  display.setCursor(0, 4);
+  // I hope you do not remove my name
+  String headerText = "WS3518X " + String(FWVersion) + " by NguyenHungA5    ";  // Extra spaces for smooth loop
+  
+  // Update scroll position every 200ms
+  if (millis() - lastScrollTime > 200) {
+    lastScrollTime = millis();
+    scrollPosition++;
+    if (scrollPosition >= headerText.length()) {
+      scrollPosition = 0;
+    }
+  }
+  
+  // Create scrolling effect by showing a window of the text
+  String displayText = headerText.substring(scrollPosition) + headerText.substring(0, scrollPosition);
+  display.println(displayText.substring(0, 21));  // Show only what fits on screen
+  
+  // Draw separator line
+  display.drawLine(0, 13, 128, 13, WHITE);
+  
+  // Port information
+  for (int i = 0; i < 4; i++) {
+    int yPos = 18 + (i * 13);
+    display.setCursor(0, yPos);
+    
+    // Port number and status
+    display.print("P");
+    display.print(i + 1);
+    display.print(": ");
+    
+    if (ports[i].isActive) {
+      // Voltage and Current
+      display.print(ports[i].voltage, 1);
+      display.print("V ");
+      display.print(ports[i].current, 1);
+      display.print("A");
+      
+      // Temperature on the right side
+      display.print(" ");
+      display.print(ports[i].temperature, 1);
+      display.print("C");
+    } else {
+      display.print("OFF");
+    }
+  }
+  
+  display.display();
+}
+
+float lastTemperature = 0;
 void checkTemperature() {
   static unsigned long lastChecktime = 0;
   unsigned long currentTime = millis();
@@ -150,7 +240,7 @@ void checkTemperature() {
   }
 
   lastChecktime = currentTime;
-  lastTemperature = (int)Thermister(analogRead(TEMPERATURE_SENSOR_PIN));
+  lastTemperature = Thermister(analogRead(TEMPERATURE_SENSOR_PIN));
   displayInfo();
 
   int fanSpeed = 0;
@@ -212,7 +302,33 @@ void buildServer() {
 
   
     server->on("/monitor", HTTP_GET, [&](AsyncWebServerRequest *request) {
-        request->send(200, "text/plain", String(lastTemperature));
+        StaticJsonDocument<512> doc;
+        JsonArray portsArray = doc.createNestedArray("ports");
+        
+        for (int i = 0; i < 4; i++) {
+            JsonObject port = portsArray.createNestedObject();
+            port["voltage"] = ports[i].voltage;
+            port["current"] = ports[i].current;
+            port["temperature"] = ports[i].temperature;
+            port["active"] = ports[i].isActive;
+            port["power"] = ports[i].getPower();
+        }
+        
+        // Module temperature
+        doc["moduleTemp"] = lastTemperature;
+        
+        String response;
+        serializeJson(doc, response);
+        request->send(200, "application/json", response);
+    });
+    
+    server->on("/info", HTTP_GET, [](AsyncWebServerRequest *request) {
+        StaticJsonDocument<128> doc;
+        doc["firmware"] = FWVersion;
+        
+        String response;
+        serializeJson(doc, response);
+        request->send(200, "application/json", response);
     });
     
     server->begin();
@@ -232,16 +348,32 @@ void setupI2C() {
 
 }
 
-void displayInfo() {
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(WHITE);
-  display.setCursor(0, 0);
+// Example of updating port values
+void updatePortValues() {
+    for (int i = 0; i < 4; i++) {
+        ports[i].voltage = readVoltage(i);    
+        ports[i].current = readCurrent(i);    
+        ports[i].temperature = readTemp(i);   
+        ports[i].isActive = random(0, 10) > 2;  // 70% chance to be active
+    }
+}
 
-  display.print("WS3518X monitor ");
-  display.println(FWVersion);
-  display.setCursor(0, 40);
-  display.println(lastTemperature);
-  display.display();
+float readVoltage(int port) {
+    // Predefined voltage values
+    const float voltages[] = {5.0, 9.0, 15.0, 19.0};
+    const int numVoltages = 4;
+    
+    // Pick a random index from 0 to 3
+    int index = random(0, numVoltages);
+    return voltages[index];
+}
 
+float readCurrent(int port) {
+    // Random current between 0-3A
+    return random(0, 30) / 10.0;
+}
+
+float readTemp(int port) {
+    // Random temperature between 0-100°C
+    return random(0, 1000) / 10.0;  // Divide by 10 to get decimal places
 }
