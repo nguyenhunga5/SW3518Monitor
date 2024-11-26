@@ -146,6 +146,8 @@ float readCurrent(int port);
 
 float readTemp(int port);
 
+String readProtocol(int port);
+
 void loop() {
     static unsigned long lastUpdate = 0;
     if (millis() - lastUpdate > 1000) {  // Update every second
@@ -310,7 +312,8 @@ void buildServer() {
             port["voltage"] = ports[i].voltage;
             port["current"] = ports[i].current;
             port["temperature"] = ports[i].temperature;
-            port["active"] = ports[i].isActive;
+            port["protocol"] = ports[i].protocol;
+            port["isActive"] = ports[i].isActive;
             port["power"] = ports[i].getPower();
         }
         
@@ -353,7 +356,8 @@ void updatePortValues() {
     for (int i = 0; i < 4; i++) {
         ports[i].voltage = readVoltage(i);    
         ports[i].current = readCurrent(i);    
-        ports[i].temperature = readTemp(i);   
+        ports[i].temperature = readTemp(i);
+        ports[i].protocol = readProtocol(i);
         ports[i].isActive = random(0, 10) > 2;  // 70% chance to be active
     }
 }
@@ -376,4 +380,11 @@ float readCurrent(int port) {
 float readTemp(int port) {
     // Random temperature between 0-100°C
     return random(0, 1000) / 10.0;  // Divide by 10 to get decimal places
+}
+
+String readProtocol(int port) {
+    // Predefined protocols
+    const String protocols[] = {"PD", "QC3", "QC4", "QC5"};
+    const int numProtocols = 4;
+    return protocols[port];
 }

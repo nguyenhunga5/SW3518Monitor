@@ -338,7 +338,7 @@
             <div class="port-status" id="status1"></div>
             <h2>Port 1</h2>
             <div class="port-info">
-                <span>Protocol:</span> PD
+                <span>Protocol:</span> <span id="protocol1">-</span>
             </div>
             <div class="port-info">
                 <span>Voltage:</span> <span id="voltage1">0</span>V
@@ -362,7 +362,7 @@
             <div class="port-status" id="status2"></div>
             <h2>Port 2</h2>
             <div class="port-info">
-                <span>Protocol:</span> QC3
+                <span>Protocol:</span> <span id="protocol2">-</span>
             </div>
             <div class="port-info">
                 <span>Voltage:</span> <span id="voltage2">0</span>V
@@ -386,7 +386,7 @@
             <div class="port-status" id="status3"></div>
             <h2>Port 3</h2>
             <div class="port-info">
-                <span>Protocol:</span> PD
+                <span>Protocol:</span> <span id="protocol3">-</span>
             </div>
             <div class="port-info">
                 <span>Voltage:</span> <span id="voltage3">0</span>V
@@ -410,7 +410,7 @@
             <div class="port-status" id="status4"></div>
             <h2>Port 4</h2>
             <div class="port-info">
-                <span>Protocol:</span> QC3
+                <span>Protocol:</span> <span id="protocol4">-</span>
             </div>
             <div class="port-info">
                 <span>Voltage:</span> <span id="voltage4">0</span>V
@@ -525,15 +525,41 @@
 
         // Update the updatePort function to include color calculation
         function updatePort(portNum, data) {
+            // Update status based on active state
+            const statusElement = document.getElementById(`status${portNum}`);
+            const portCard = document.getElementById(`status${portNum}`).parentElement;
+            
+            if (!data.isActive) {
+                // Port is inactive - show dashes and gray out
+                statusElement.className = 'port-status error';
+                portCard.style.opacity = '0.6';
+                
+                document.getElementById(`protocol${portNum}`).textContent = '--';
+                document.getElementById(`voltage${portNum}`).textContent = '--';
+                document.getElementById(`current${portNum}`).textContent = '--';
+                document.getElementById(`temp${portNum}`).textContent = '--';
+                document.getElementById(`watts${portNum}`).textContent = '--';
+                
+                // Reset progress bar
+                const progressBar = document.getElementById(`progress${portNum}`);
+                progressBar.style.width = '0%';
+                return;
+            }
+            
+            // Port is active - show normal data
+            portCard.style.opacity = '1';
+            statusElement.className = 'port-status';
+            
             const voltage = parseFloat(data.voltage);
             const current = parseFloat(data.current);
             
+            document.getElementById(`protocol${portNum}`).textContent = data.protocol;
             document.getElementById(`voltage${portNum}`).textContent = voltage.toFixed(2);
             document.getElementById(`current${portNum}`).textContent = current.toFixed(2);
             document.getElementById(`temp${portNum}`).textContent = data.temperature.toFixed(1);
             
             // Calculate power and update
-            const watts = voltage * current;
+            const watts = parseFloat(data.power);
             document.getElementById(`watts${portNum}`).textContent = watts.toFixed(1);
             
             // Calculate percentage (assuming max 100W)
@@ -639,7 +665,6 @@
                 data.ports.forEach((port, index) => {
                     if (port && typeof port === 'object') {
                         updatePort(index + 1, port);
-                        updatePortStatus(index + 1, ''); // Normal state
                     }
                 });
 
@@ -711,9 +736,10 @@
             // Calculate total power
             let totalPower = 0;
             for (let i = 1; i <= 4; i++) {
-                const voltage = parseFloat(document.getElementById(`voltage${i}`).textContent);
-                const current = parseFloat(document.getElementById(`current${i}`).textContent);
-                totalPower += voltage * current;
+                const portData = data.ports[i - 1];
+                if (portData.isActive) {
+                    totalPower += portData.power || 0;  // Use server-provided power, fallback to 0
+                }
             }
             
             // Update total power display with color gradient
