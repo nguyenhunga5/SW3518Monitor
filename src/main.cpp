@@ -206,25 +206,30 @@ void displayInfo() {
   // Port information
   for (int i = 0; i < 4; i++) {
     int yPos = 18 + (i * 13);
-    display.setCursor(0, yPos);
     
-    // Port number and status
+    // Port number (column 0)
+    display.setCursor(0, yPos);
     display.print("P");
     display.print(i + 1);
-    display.print(": ");
     
     if (ports[i].isActive) {
-      // Voltage and Current
+      // Voltage (column 20)
+      display.setCursor(20, yPos);
       display.print(ports[i].voltage, 1);
-      display.print("V ");
+      display.print("V");
+      
+      // Current (column 55)
+      display.setCursor(55, yPos);
       display.print(ports[i].current, 1);
       display.print("A");
       
-      // Temperature on the right side
-      display.print(" ");
-      display.print(ports[i].temperature, 1);
-      display.print("C");
+      // Power (column 90)
+      display.setCursor(90, yPos);
+      display.print(ports[i].getPower(), 1);
+      display.print("W");
     } else {
+      // OFF status (column 20)
+      display.setCursor(20, yPos);
       display.print("OFF");
     }
   }
