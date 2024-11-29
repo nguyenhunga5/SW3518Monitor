@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WS3518x Monitor Log Viewer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 20px;
+        }
+
+        #log {
+            background: #fff;
+            border: 1px solid #ccc;
+            padding: 10px;
+            height: 400px;
+            overflow-y: scroll;
+            white-space: pre-wrap;
+        }
+    </style>
+    <script>
+        var ws;
+        window.addEventListener('load', onload);
+
+        function onload(event) {
+            initWebSocket();
+        }
+
+        function initWebSocket() {
+            var gateway = `ws://${window.location.hostname}:81/ws`;
+            const logDiv = document.getElementById('log');
+            ws = new WebSocket(gateway);
+
+            ws.onopen = function () {
+                console.log('WebSocket connection established');
+            };
+
+            ws.onmessage = function (event) {
+                let message = event.data;
+
+                logDiv.innerText = (logDiv.innerText.length > 10000 ? "" : logDiv.innerText) + message + '\n'; // Append new log message
+                logDiv.scrollTop = logDiv.scrollHeight; // Auto-scroll to the bottom
+            };
+
+            ws.onclose = function () {
+                console.log('WebSocket connection closed');
+                setTimeout(function () {
+                    initWebSocket();
+                }, 1000);
+            };
+
+            ws.onerror = function (error) {
+                console.error('WebSocket error:', error);
+            };
+        }
+    </script>
+</head>
+
+<body>
+    <h1>WS3518x Monitor Log Viewer</h1>
+    <div id="log">Waiting for logs...</div>
+</body>
+
+</html>

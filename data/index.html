@@ -32,7 +32,6 @@
         body {
             display: flex;
             flex-direction: column;
-            justify-content: center;
             align-items: center;
             min-height: 100vh;
             margin: 0;
@@ -306,19 +305,91 @@
             fill: currentColor;
             vertical-align: middle;
         }
+
+        /* Add styles for the log button and iframe */
+        #logButton {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+        #logButton:hover {
+            background-color: #0056b3; /* Darker shade on hover */
+        }
+        #logFrame {
+            display: none; /* Initially hidden */
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%;
+            height: 80%;
+            border: none;
+            background-color: white;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            z-index: 1001;
+            border-radius: 8px;
+        }
+
+        /* Overlay styles */
+        #overlay {
+            display: none; /* Initially hidden */
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
     </style>
 </head>
 <body>
-    <div id="warningMessage" class="warning-message">
-        ⚠️ Connection issues detected. Data may be outdated.
-    </div>
-
     <div class="theme-switch-wrapper">
         <label class="theme-switch">
             <input type="checkbox" id="theme-toggle">
             <span class="slider"></span>
         </label>
+        <button id="logButton">Show Logs</button>
     </div>
+
+    <iframe id="logFrame" src="/log"></iframe>
+    <div id="overlay"></div>
+
+    <script>
+        const logButton = document.getElementById('logButton');
+        const logFrame = document.getElementById('logFrame');
+        const overlay = document.getElementById('overlay');
+
+        logButton.addEventListener('click', () => {
+            // Toggle the visibility of the log frame and overlay
+            if (logFrame.style.display === 'none') {
+                logFrame.style.display = 'block'; // Show the log frame
+                overlay.style.display = 'block'; // Show the overlay
+                logButton.textContent = 'Hide Logs'; // Change button text
+            } else {
+                logFrame.style.display = 'none'; // Hide the log frame
+                overlay.style.display = 'none'; // Hide the overlay
+                logButton.textContent = 'Show Logs'; // Change button text
+            }
+        });
+
+        // Close log frame when overlay is clicked
+        overlay.addEventListener('click', () => {
+            logFrame.style.display = 'none'; // Hide the log frame
+            overlay.style.display = 'none'; // Hide the overlay
+            logButton.textContent = 'Show Logs'; // Change button text
+        });
+    </script>
+
+    <div id="warningMessage" class="warning-message">
+        ⚠️ Connection issues detected. Data may be outdated.
+    </div>
+
     <h1 class="main-title">WS3518x Monitor <span id="version" class="version-text"></span> by NguyenHungA5</h1>
     <div class="source-links">
         <a href="https://github.com/nguyenhunga5/SW3518Monitor" target="_blank" title="Source Code">
@@ -352,7 +423,7 @@
                     <div class="progress-fill" id="progress1"></div>
                 </div>
             </div>
-            <div class="port-info">
+            <div class="port-info" style="display: none;">
                 <span>Temperature:</span> <span id="temp1">0</span>°C
             </div>
         </div>
@@ -376,7 +447,7 @@
                     <div class="progress-fill" id="progress2"></div>
                 </div>
             </div>
-            <div class="port-info">
+            <div class="port-info" style="display: none;">
                 <span>Temperature:</span> <span id="temp2">0</span>°C
             </div>
         </div>
@@ -400,7 +471,7 @@
                     <div class="progress-fill" id="progress3"></div>
                 </div>
             </div>
-            <div class="port-info">
+            <div class="port-info" style="display: none;">
                 <span>Temperature:</span> <span id="temp3">0</span>°C
             </div>
         </div>
@@ -424,7 +495,7 @@
                     <div class="progress-fill" id="progress4"></div>
                 </div>
             </div>
-            <div class="port-info">
+            <div class="port-info" style="display: none;">
                 <span>Temperature:</span> <span id="temp4">0</span>°C
             </div>
         </div>
