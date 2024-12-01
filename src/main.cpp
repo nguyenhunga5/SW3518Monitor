@@ -38,6 +38,9 @@ DNSServer *dns;
 // Create an array of ports (global variable)
 std::vector<PortItem *> ports;
 
+// Is updating
+bool isUpdating = false;
+
 // Helper function for changing TCA output channel
 void tcaselect(uint8_t channel)
 {
@@ -178,6 +181,10 @@ unsigned long lastScrollTime = 0;
 uint8_t pageTime = 0;
 void displayInfo()
 {
+  if (isUpdating) {
+    return;
+  }
+
   tcaselect(0);
   display.clearDisplay();
   display.setTextSize(1);
@@ -222,7 +229,7 @@ void displayInfo()
       if (pageTime < 30)
       { // Show first page for 30 cycles
         // Voltage (column 20)
-        display.setCursor(20, yPos);
+        display.setCursor(18, yPos);
         display.print(ports[i]->voltage, 1);
         display.print("V");
 
@@ -244,8 +251,9 @@ void displayInfo()
         String displayText;
 
         // Check if the protocol text is too long
-        if (protocolText.length() > 15)
-        { // Assuming 15 characters fit in the display
+        if (protocolText.length() > 7)
+        { // Assuming 7 characters fit in the display
+          protocolText += "    "; // Extra spaces for smooth loop
           // Scroll the text
           static unsigned long lastScrollTime = 0;
           static unsigned int scrollPosition = 0;
@@ -259,7 +267,8 @@ void displayInfo()
             }
           }
           // Create the scrolling effect
-          displayText = protocolText.substring(scrollPosition) + protocolText.substring(0, scrollPosition);
+          protocolText = protocolText.substring(scrollPosition) + protocolText.substring(0, scrollPosition);
+          displayText = protocolText.substring(0, 7);
         }
         else
         {
@@ -267,11 +276,11 @@ void displayInfo()
         }
 
         // Protocol (column 20)
-        display.setCursor(20, yPos);
+        display.setCursor(18, yPos);
         display.print(displayText);
 
         // Temperature (column 90)
-        display.setCursor(90, yPos);
+        display.setCursor(70, yPos);
         display.print("Vin ");
         display.print(ports[i]->inputVoltage, 1);
         display.print("V");
@@ -286,7 +295,7 @@ void displayInfo()
     else
     {
       // OFF status (column 20)
-      display.setCursor(20, yPos);
+      display.setCursor(18, yPos);
       display.print("OFF");
     }
   }
@@ -323,7 +332,7 @@ void onOTAStart()
 {
   // Log when OTA has started
   Serial.println("OTA update started!");
-  // <Add your own code here>
+  isUpdating = true;
 }
 
 unsigned long ota_progress_millis = 0;
@@ -334,6 +343,28 @@ void onOTAProgress(size_t current, size_t final)
   {
     ota_progress_millis = millis();
     Serial.printf("OTA Progress Current: %u bytes, Final: %u bytes\n", current, final);
+
+    tcaselect(0);
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+    int startY = 10;
+    display.setCursor(0, startY);
+    display.println("Updating...");
+
+    int progressWidth = 100;
+    int progressHeight = 10;
+    int progressX = (SCREEN_WIDTH - progressWidth) / 2;
+    int progressY = startY + 30;
+    int progressValue = map(current, 0, final, 0, progressWidth);
+
+    String processText = String(progressValue) + "%";
+    display.setCursor((SCREEN_WIDTH - processText.length()) / 2, startY + 20);
+    display.println(processText);
+
+    display.fillRect(progressX, progressY, progressWidth, progressHeight, BLACK);
+    display.fillRect(progressX, progressY, progressValue, progressHeight, WHITE);
+    display.display();
   }
 }
 
@@ -385,21 +416,29 @@ void buildServer()
              {
         StaticJsonDocument<512> doc;
         JsonArray portsArray = doc.createNestedArray("ports");
-        
-        for (int i = 0; i < 4; i++) {
-            JsonObject port = portsArray.createNestedObject();
-            port["voltage"] = ports[i]->voltage;
-            port["current"] = ports[i]->current;
-            port["temperature"] = ports[i]->temperature;
-            port["protocol"] = ports[i]->protocol;
-            port["isActive"] = ports[i]->isActive;
-            port["power"] = ports[i]->getPower();
+        float inputVoltage = 0.0;
+        for (int i = 0; i < 4; i++)
+        {
+          JsonObject port = portsArray.createNestedObject();
+          port["voltage"] = ports[i]->voltage;
+          port["current"] = ports[i]->current;
+          port["temperature"] = ports[i]->temperature;
+          port["protocol"] = ports[i]->protocol;
+          port["isActive"] = ports[i]->isActive;
+          port["power"] = ports[i]->getPower();
+          if (ports[i]->isActive) {
+            inputVoltage = ports[i]->inputVoltage;
+          }
         }
-        
+
         // Module temperature
         doc["moduleTemp"] = lastTemperature;
         
-        String response;
+        // Module Input Voltage
+        // Because all port using same input source, so we just need first active port
+        doc["inputVoltage"] = inputVoltage;
+
+            String response;
         serializeJson(doc, response);
         request->send(200, "application/json", response); });
 

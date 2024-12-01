@@ -505,6 +505,10 @@
         <h2 class="summary-title">System Summary</h2>
         <div class="summary-info">
             <div class="summary-item">
+                <span class="summary-label">Input Voltage</span>
+                <span class="summary-value"><span id="inputVoltage">N/A</span></span>
+            </div>
+            <div class="summary-item">
                 <span class="summary-label">Total Power</span>
                 <span class="summary-value"><span id="totalPower">0</span></span>
             </div>
@@ -829,6 +833,11 @@
             const tempPercentage = Math.min(Math.max((moduleTemp - 20) / (60 - 20) * 100, 0), 100);
             moduleTempElement.style.color = `hsl(${((100 - tempPercentage) * 120) / 100}, 100%, 40%)`;
             moduleTempElement.textContent = moduleTemp.toFixed(1) + '°C';
+
+            // Update input voltage in summary
+            const inputVoltageElement = document.getElementById('inputVoltage');
+            const inputVoltage = data.inputVoltage; // Assuming inputVoltage is part of the response
+            inputVoltageElement.textContent = inputVoltage ? inputVoltage.toFixed(2) + 'V' : 'N/A';
         }
     </script>
 </body>
