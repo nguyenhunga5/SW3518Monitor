@@ -346,10 +346,32 @@
             background-color: rgba(0, 0, 0, 0.5);
             z-index: 1000;
         }
+
+        .reset-button {
+            background-color: #ff4c4c; /* Red background */
+            color: white; /* White text */
+            border: none; /* No border */
+            border-radius: 5px; /* Rounded corners */
+            padding: 10px 15px; /* Padding for better size */
+            cursor: pointer; /* Pointer cursor on hover */
+            left: -60px; /* Adjust as needed */
+            top: 10px; /* Adjust as needed */
+            transition: background-color 0.3s; /* Smooth transition */
+        }
+
+        .reset-button:hover {
+            background-color: #ff1a1a; /* Darker red on hover */
+        }
     </style>
 </head>
 <body>
     <div class="theme-switch-wrapper">
+        <span id="toggleLabel">Power </span>
+        <label class="theme-switch">
+            <input type="checkbox" id="toggleSwitch" onclick="togglePower()">
+            <span class="slider"></span>
+        </label>
+        <span id="toggleTheme">Theme </span>
         <label class="theme-switch">
             <input type="checkbox" id="theme-toggle">
             <span class="slider"></span>
@@ -423,6 +445,10 @@
                     <div class="progress-fill" id="progress1"></div>
                 </div>
             </div>
+            <div class="port-info" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>Total Energy:</span> <span id="totalEnergy1">0</span>
+                <button class="reset-button" onclick="resetTotalEneryPort(1)">Reset</button>
+            </div>
             <div class="port-info" style="display: none;">
                 <span>Temperature:</span> <span id="temp1">0</span>°C
             </div>
@@ -446,6 +472,10 @@
                 <div class="progress-bar">
                     <div class="progress-fill" id="progress2"></div>
                 </div>
+            </div>
+            <div class="port-info" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>Total Energy:</span> <span id="totalEnergy2">0</span>
+                <button class="reset-button" onclick="resetTotalEneryPort(2)">Reset</button>
             </div>
             <div class="port-info" style="display: none;">
                 <span>Temperature:</span> <span id="temp2">0</span>°C
@@ -471,6 +501,10 @@
                     <div class="progress-fill" id="progress3"></div>
                 </div>
             </div>
+            <div class="port-info" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>Total Energy:</span> <span id="totalEnergy3">0</span>
+                <button class="reset-button" onclick="resetTotalEneryPort(3)">Reset</button>
+            </div>
             <div class="port-info" style="display: none;">
                 <span>Temperature:</span> <span id="temp3">0</span>°C
             </div>
@@ -495,6 +529,10 @@
                     <div class="progress-fill" id="progress4"></div>
                 </div>
             </div>
+            <div class="port-info" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>Total Energy:</span> <span id="totalEnergy4">0</span>
+                <button class="reset-button" onclick="resetTotalEneryPort(4)">Reset</button>
+            </div>
             <div class="port-info" style="display: none;">
                 <span>Temperature:</span> <span id="temp4">0</span>°C
             </div>
@@ -509,7 +547,7 @@
                 <span class="summary-value"><span id="inputVoltage">N/A</span></span>
             </div>
             <div class="summary-item">
-                <span class="summary-label">Total Power</span>
+                <span class="summary-label">Current Power</span>
                 <span class="summary-value"><span id="totalPower">0</span></span>
             </div>
             <div class="summary-item">
@@ -614,6 +652,7 @@
                 document.getElementById(`current${portNum}`).textContent = '--';
                 document.getElementById(`temp${portNum}`).textContent = '--';
                 document.getElementById(`watts${portNum}`).textContent = '--';
+                document.getElementById(`totalEnergy${portNum}`).textContent = '--';
                 
                 // Reset progress bar
                 const progressBar = document.getElementById(`progress${portNum}`);
@@ -632,6 +671,18 @@
             document.getElementById(`voltage${portNum}`).textContent = voltage.toFixed(2);
             document.getElementById(`current${portNum}`).textContent = current.toFixed(2);
             document.getElementById(`temp${portNum}`).textContent = data.temperature.toFixed(1);
+
+            let totalPowerStr = '';
+            if (data.totalPower < 1.0) {
+                totalPowerStr = (data.totalPower * 1000.0).toFixed(2) + 'mWh';
+            }
+            else if (data.totalPower > 1000.0) {
+                totalPowerStr = (data.totalPower / 1000.0).toFixed(2) + 'kWh';
+            } else {
+                totalPowerStr = data.totalPower.toFixed(2) + 'Wh';
+            }
+
+            document.getElementById(`totalEnergy${portNum}`).textContent = totalPowerStr;
             
             // Calculate power and update
             const watts = parseFloat(data.power);
@@ -838,6 +889,62 @@
             const inputVoltageElement = document.getElementById('inputVoltage');
             const inputVoltage = data.inputVoltage; // Assuming inputVoltage is part of the response
             inputVoltageElement.textContent = inputVoltage ? inputVoltage.toFixed(2) + 'V' : 'N/A';
+
+            // Update power switch status
+            const toggleSwitch = document.getElementById('toggleSwitch');
+            toggleSwitch.checked = data.state;
+        }
+
+        function togglePower() {
+            const toggleSwitch = document.getElementById('toggleSwitch');
+            const action = toggleSwitch.checked ? 'on' : 'off'; // Determine action based on switch state
+
+            // Show confirmation dialog
+            const confirmAction = confirm(`Are you sure you want to turn ${action}?`);
+            if (confirmAction) {
+                // Send the state to the /state API
+                const formData = new FormData();
+                formData.append('state', action);
+                fetch('/state', {
+                    method: 'POST',
+                    body: formData,
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        // Update label based on new state
+                        alert('Failed to change state. Please try again.');
+                        toggleSwitch.checked = !toggleSwitch.checked;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred. Please try again.');
+                    toggleSwitch.checked = !toggleSwitch.checked;
+                });
+            } else {
+                // Revert the switch if the action is canceled
+                toggleSwitch.checked = !toggleSwitch.checked;
+            }
+        }
+
+        function resetTotalEneryPort(port) {
+            // Show confirmation dialog
+            const confirmAction = confirm(`Do you want to reset the energy usage for port ${port}?`);
+            if (confirmAction) {
+                // Send the state to the /state API
+                const formData = new FormData();
+                formData.append('port', port);
+                fetch('/reset_energy', {
+                    method: 'POST',
+                    body: formData,
+                })
+                    .then(response => {
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('An error occurred. Please try again.');
+                    });
+            }
         }
     </script>
 </body>

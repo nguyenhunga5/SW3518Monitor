@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SH1106.h>
 #include "LittleFS.h"
@@ -15,6 +16,7 @@
 
 #include "defines.h"
 #include "PortItem.h"
+#include "Config.h"
 
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
@@ -38,6 +40,9 @@ DNSServer *dns;
 // Create an array of ports (global variable)
 std::vector<PortItem *> ports;
 
+// Config
+Config *config = nullptr;
+
 // Is updating
 bool isUpdating = false;
 
@@ -54,6 +59,7 @@ void tcaselect(uint8_t channel)
 
 void buildServer();
 void setupI2C();
+void updateSwitch();
 
 void setup()
 {
@@ -78,6 +84,10 @@ void setup()
       file = root.openNextFile();
     }
   }
+
+  config = new Config();
+  // Force update switch state
+  updateSwitch();
 
   byte error, address;
   int nDevices;
@@ -414,7 +424,7 @@ void buildServer()
 
   server->on("/monitor", HTTP_GET, [&](AsyncWebServerRequest *request)
              {
-        StaticJsonDocument<512> doc;
+        StaticJsonDocument<640> doc;
         JsonArray portsArray = doc.createNestedArray("ports");
         float inputVoltage = 0.0;
         for (int i = 0; i < 4; i++)
@@ -426,6 +436,7 @@ void buildServer()
           port["protocol"] = ports[i]->protocol;
           port["isActive"] = ports[i]->isActive;
           port["power"] = ports[i]->getPower();
+          port["totalPower"] = config->totalEnergyOf(i);
           if (ports[i]->isActive) {
             inputVoltage = ports[i]->inputVoltage;
           }
@@ -437,8 +448,11 @@ void buildServer()
         // Module Input Voltage
         // Because all port using same input source, so we just need first active port
         doc["inputVoltage"] = inputVoltage;
+        
+        // State of module
+        doc["state"] = config->getState();
 
-            String response;
+        String response;
         serializeJson(doc, response);
         request->send(200, "application/json", response); });
 
@@ -450,6 +464,37 @@ void buildServer()
         String response;
         serializeJson(doc, response);
         request->send(200, "application/json", response); });
+
+  server->on("/state", HTTP_GET, [](AsyncWebServerRequest *request)
+             {
+        StaticJsonDocument<128> doc;
+        doc["state"] = config->getState();
+
+        String response;
+        serializeJson(doc, response);
+        request->send(200, "application/json", response);
+  });
+
+  server->on("/state", HTTP_POST, [](AsyncWebServerRequest *request)
+             {
+        String state = request->arg("state");
+        if (state == "on") {
+          config->setState(true);
+        } else if (state == "off") {
+          config->setState(false);
+        }
+
+        logMessage("Update state to => " + state);
+        updateSwitch();
+        request->send(200, "application/json", "State updated");
+  });
+
+  server->on("/reset_energy", HTTP_POST, [](AsyncWebServerRequest *request)
+             {
+        int portIndex = request->arg("port").toInt();
+        config->resetTotalEnergy(portIndex - 1);
+        logMessage("Reset total energy of port " + String(portIndex));
+        request->send(200, "application/json", "State updated"); });
 
   server->begin();
   Serial.println("HTTP server started");
@@ -475,7 +520,8 @@ void setupI2C()
   }
 }
 
-// Example of updating port values
+// Updating port values
+float powerInterval = 1000.0 / 3600000.0;
 void updatePortValues()
 {
   for (int i = 0; i < 4; i++)
@@ -487,6 +533,12 @@ void updatePortValues()
       logMessage("\nPort " + String(i + 1) + " is active");
       ports[i]->update();
       ports[i]->isActive = true;
+      float power = ports[i]->getPower();
+      if (power > 0.0)
+      {
+        float enegy = power * powerInterval;
+        config->updateTotalEnergy(enegy, i);
+      }
     }
     else
     {
@@ -504,4 +556,8 @@ void notifyClients(String data)
 void logMessage(const String &message)
 {
   notifyClients(message); // Send message to all connected WebSocket clients
+}
+
+void updateSwitch() {
+  digitalWrite(SWITCH_PIN, config->getState());
 }

@@ -1,5 +1,4 @@
 #include "PortItem.h"
-#include <string>
 
 PortItem::PortItem() {
     sw = new SW35xx(Wire);
@@ -89,7 +88,8 @@ void PortItem::update() {
     protocol = fastChargeType2String(sw->fastChargeType, sw->PDVersion);
     temperature = sw->readTemperature();
     // Convert temperature from mV to Celsius
-    float tempCelsius = (temperature - 500) / 10.0;
+    // float tempCelsius = (temperature - 500) / 10.0;
+    // Current disable because in the board, NTC pin is connected to GND, so we cannot use it.
     logMessage("=======================================");
     logMessage("Current input voltage: " + String(sw->vin_mV) + "mV");
     logMessage("Current output voltage: " + String(sw->vout_mV) + "mV");
