@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HTML Editor</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.0/codemirror.min.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        textarea {
+            width: 100%;
+            height: 200px;
+        }
+        iframe {
+            width: 100%;
+            height: 300px;
+            border: 1px solid #ccc;
+        }
+        .button {
+            background-color: #4CAF50; /* Green background */
+            border: none; /* Remove borders */
+            color: white; /* White text */
+            padding: 10px 20px; /* Reduced padding for smaller height */
+            text-align: center; /* Centered text */
+            text-decoration: none; /* Remove underline */
+            display: inline-block; /* Make the button inline */
+            font-size: 14px; /* Slightly smaller font size */
+            margin: 4px 2px; /* Add some margin */
+            cursor: pointer; /* Pointer cursor on hover */
+            border-radius: 5px; /* Rounded corners */
+            transition: background-color 0.3s; /* Smooth transition */
+        }
+
+        .button:hover {
+            background-color: #45a049; /* Darker green on hover */
+        }
+    </style>
+</head>
+<body>
+    <h1>HTML Editor</h1>
+    <textarea id="htmlInput" placeholder="Type your HTML code here..."></textarea>
+    <button class="button" id="previewButton">Preview</button>
+    <button class="button" id="saveButton">Save</button><label id="update_result"></label>
+    <h2>Output:</h2>
+    <iframe id="outputFrame"></iframe>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.0/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.0/mode/xml/xml.min.js"></script>
+    <script>
+        
+        const htmlInput = document.getElementById('htmlInput');
+        const outputFrame = document.getElementById('outputFrame');
+
+        const editor = CodeMirror.fromTextArea(htmlInput, {
+            mode: "text/html",
+            lineNumbers: true,
+            theme: "default"
+        });
+
+        function updatePreview() {
+            const content = editor.getValue();
+            const doc = outputFrame.contentDocument || outputFrame.contentWindow.document;
+            doc.open();
+            doc.write(content);
+            doc.close();
+        }
+
+        async function getHtmlContent() {
+            try {
+                const response = await fetch('/edit_content');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.text();
+                editor.getDoc().setValue(data);
+                updatePreview();
+            } catch (error) {
+                console.error('Error fetching index.html content:', error);
+            }
+        }
+
+        getHtmlContent();
+
+        async function saveHtmlContent() {
+            const content = editor.getValue();
+            try {
+                // Create a Blob from the content
+                const blob = new Blob([content], { type: 'text/html' });
+
+                // Create a FormData object
+                const formData = new FormData();
+                formData.append('file', blob, 'index.html'); // Add the file to FormData
+
+                // Send the request
+                const response = await fetch('/edit', {
+                    method: 'POST',
+                    body: formData, // FormData automatically sets the correct headers
+                });
+
+                const data = await response.text();
+                document.getElementById("update_result").innerText = data;
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                console.log('Content saved successfully!');
+            } catch (error) {
+                console.error('Error saving content:', error);
+            }
+        }
+
+        document.getElementById('saveButton').addEventListener('click', saveHtmlContent);
+        document.getElementById('previewButton').addEventListener('click', updatePreview);
+    </script>
+</body>
+</html>

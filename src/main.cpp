@@ -85,6 +85,9 @@ void setup()
     }
   }
 
+  pinMode(SWITCH_PIN, OUTPUT);
+  pinMode(SWITCH_BUTTON, INPUT);
+
   config = new Config();
   // Force update switch state
   updateSwitch();
@@ -392,6 +395,9 @@ void onOTAEnd(bool success)
   // <Add your own code here>
 }
 
+File uploadFile;
+// Handle large file upload
+void handleTextUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final);
 void buildServer()
 {
   if (!MDNS.begin(kServerName))
@@ -484,7 +490,6 @@ void buildServer()
           config->setState(false);
         }
 
-        logMessage("Update state to => " + state);
         updateSwitch();
         request->send(200, "application/json", "State updated");
   });
@@ -495,6 +500,17 @@ void buildServer()
         config->resetTotalEnergy(portIndex - 1);
         logMessage("Reset total energy of port " + String(portIndex));
         request->send(200, "application/json", "State updated"); });
+
+  server->on("/edit", HTTP_GET, [](AsyncWebServerRequest *request)
+             {
+        request->send(LittleFS, "/edit.html", "text/html");
+  });
+
+  server->on("/edit_content", HTTP_GET, [](AsyncWebServerRequest *request)
+             { request->send(LittleFS, "/index.html", "text/html"); });
+
+  server->on("/edit", HTTP_POST, [](AsyncWebServerRequest *request)
+             { request->send(200, "text/plain", "File written successfully"); }, handleTextUpload);
 
   server->begin();
   Serial.println("HTTP server started");
@@ -560,4 +576,48 @@ void logMessage(const String &message)
 
 void updateSwitch() {
   digitalWrite(SWITCH_PIN, config->getState());
+  String stateStr = config->getState() ? "On" : "Off";
+  logMessage("Update state to => " + stateStr);
 }
+
+// Handle large file upload
+void handleTextUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
+{
+    if (index == 0)
+    {
+      // First chunk of data, open the file
+      logMessage("Starting text upload");
+      if (LittleFS.exists("/index.html"))
+      {
+        LittleFS.remove("/index.html"); // Remove the existing file if it exists
+      }
+      uploadFile = LittleFS.open("/index.html", "w");
+      if (!uploadFile)
+      {
+        logMessage("Failed to open file for writing");
+        request->send(500, "text/plain", "Failed to open file for writing");
+        return;
+      }
+    }
+
+    // Write the current chunk to the file
+    if (uploadFile)
+    {
+      uploadFile.write(data, len);
+      logMessage("Written " + String(len) + " bytes");
+    }
+    else
+    {
+      logMessage("File not open during write");
+    }
+
+    if (final)
+    {
+      // All chunks received
+      logMessage("Html upload complete");
+      if (uploadFile)
+      {
+        uploadFile.close();
+      }
+    }
+  }

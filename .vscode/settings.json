@@ -1,3 +1,6 @@
 {
-    "workbench.editor.tabActionLocation": "left"
+    "workbench.editor.tabActionLocation": "left",
+    "files.associations": {
+        "*.tcc": "cpp"
+    }
 }
