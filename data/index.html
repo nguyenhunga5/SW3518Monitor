@@ -658,6 +658,10 @@
                 <span class="summary-label">Module Temperature</span>
                 <span class="summary-value"><span id="moduleTemp">0</span></span>
             </div>
+            <div class="summary-item">
+                <span class="summary-label">Fan Speed</span>
+                <span class="summary-value"><span id="fanSpeed">0%</span></span>
+            </div>
         </div>
     </div>
 
@@ -1005,6 +1009,14 @@
             // Update power switch status
             const toggleSwitch = document.getElementById('toggleSwitch');
             toggleSwitch.checked = data.state;
+
+            const maxFanValue = 250;
+            const fanSpeed = data.fanSpeed;
+            const fanPercentage = Math.min(Math.max((fanSpeed / maxFanValue) * 100, 0), 100);
+            const fanHue = ((100 - fanPercentage) * 120) / 100;
+            const fanColor = `hsl(${fanHue}, 100%, 40%)`;
+            document.getElementById('fanSpeed').style.color = fanColor;
+            document.getElementById('fanSpeed').textContent = fanPercentage.toFixed(1) + '%';
         }
 
         function togglePower() {

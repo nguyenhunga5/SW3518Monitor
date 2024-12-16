@@ -46,6 +46,8 @@ Config *config = nullptr;
 // Is updating
 bool isUpdating = false;
 
+int fanSpeed = 0;
+
 // Helper function for changing TCA output channel
 void tcaselect(uint8_t channel)
 {
@@ -330,11 +332,25 @@ void checkTemperature()
   lastTemperature = Thermister(analogRead(TEMPERATURE_SENSOR_PIN));
   displayInfo();
 
-  int fanSpeed = 0;
-  if (lastTemperature > kMinTemperature)
-  {
+  float percent = (lastTemperature - kMinTemperature) / (kMaxTemperature - kMinTemperature);
+    float totalPower = 0;
+    if (ports.size() == 4)
+    {
+      for (size_t i = 0; i < 4; i++)
+      {
+        if (ports[i]->isActive)
+        {
+          totalPower += ports[i]->getPower();
+        }
+      }
+    } 
+    
+    float pPercent = totalPower / kMaxPower; // kMaxPower is power max per port, so we just estimate total power
 
-    float percent = (lastTemperature - kMinTemperature) / (kMaxTemperature - kMinTemperature);
+  if (lastTemperature > kMinTemperature || pPercent > percent)
+  {
+    percent = max(pPercent, percent);
+
     fanSpeed = min((int)(percent * 250), 250);
   }
 
@@ -457,6 +473,8 @@ void buildServer()
         
         // State of module
         doc["state"] = config->getState();
+
+        doc["fanSpeed"] = fanSpeed;
 
         String response;
         serializeJson(doc, response);

@@ -13,5 +13,6 @@
 #define SWITCH_PIN 13
 #define SWITCH_BUTTON 16
 #define LED_STATUS 14
+#define kMaxPower 100.0
 
 #endif
