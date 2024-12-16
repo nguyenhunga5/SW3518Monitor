@@ -84,6 +84,7 @@
         getHtmlContent();
 
         async function saveHtmlContent() {
+            document.getElementById("update_result").innerText = "Sending...";
             const content = editor.getValue();
             try {
                 // Create a Blob from the content
