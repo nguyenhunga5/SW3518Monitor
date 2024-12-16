@@ -24,45 +24,60 @@
     </style>
     <script>
         var ws;
-        window.addEventListener('load', onload);
-
-        function onload(event) {
-            initWebSocket();
-        }
 
         function initWebSocket() {
             var gateway = `ws://${window.location.hostname}:81/ws`;
-            const logDiv = document.getElementById('log');
             ws = new WebSocket(gateway);
 
             ws.onopen = function () {
-                console.log('WebSocket connection established');
+                console.log('Connected to WebSocket');
             };
 
             ws.onmessage = function (event) {
+                const logDiv = document.getElementById('log');
+                const autoscrollToggle = document.getElementById('autoscroll-toggle');
                 let message = event.data;
-
-                logDiv.innerText = (logDiv.innerText.length > 10000 ? "" : logDiv.innerText) + message + '\n'; // Append new log message
-                logDiv.scrollTop = logDiv.scrollHeight; // Auto-scroll to the bottom
+                logDiv.innerText = logDiv.innerText + message + '\n'; // Append new log message
+                if (autoscrollToggle.checked) {
+                    logDiv.scrollTop = logDiv.scrollHeight; // Auto-scroll to the bottom
+                }
             };
 
             ws.onclose = function () {
                 console.log('WebSocket connection closed');
-                setTimeout(function () {
-                    initWebSocket();
-                }, 1000);
+                setTimeout(initWebSocket, 2000);
             };
 
             ws.onerror = function (error) {
                 console.error('WebSocket error:', error);
             };
         }
+
+        // Handle visibility changes
+        document.addEventListener('visibilitychange', function() {
+            if (document.needHide === true && ws) {
+                ws.close();
+                console.log('WebSocket closed due to page hidden');
+            } else if (document.visibilityState === 'visible') {
+                initWebSocket();
+            }
+        });
     </script>
 </head>
 
 <body>
     <h1>WS3518x Monitor Log Viewer</h1>
     <div id="log">Waiting for logs...</div>
+    <input type="checkbox" id="autoscroll-toggle" checked/>
+    <label for="autoscroll-toggle">Autoscroll</label>
+    <button id="clearLogButton">Clear Log</button>
+    <script>
+        const clearLogButton = document.getElementById('clearLogButton');
+        clearLogButton.addEventListener('click', () => {
+            const logDiv = document.getElementById('log');
+            logDiv.innerText = '';
+        });
+    </script>
 </body>
 
 </html>

@@ -345,7 +345,7 @@ void checkTemperature()
       }
     } 
     
-    float pPercent = totalPower / kMaxPower; // kMaxPower is power max per port, so we just estimate total power
+    float pPercent = (totalPower - kMinPower) / (kMaxPower - kMinPower); // kMaxPower is power max per port, so we just estimate total power
 
   if (lastTemperature > kMinTemperature || pPercent > percent)
   {
