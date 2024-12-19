@@ -2,7 +2,8 @@
 #define DEFINES_H
 
 #define FWVersion "1.0"
-#define kTimeToCheckTemperature 500       // 500ms
+#define kTimeToCheckTemperature 1000       // 1000ms
+#define kTimeToChangeFan 10000       // 10000ms
 #define kTimeToReadInformation 150        // 150ms
 #define FAN_PIN 12                           // For PWM control fan
 #define kServerName "sw3518monitor"

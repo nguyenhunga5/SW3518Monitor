@@ -162,6 +162,18 @@ void setup()
 void checkTemperature();
 void updatePortValues();
 
+/**
+ * @brief The main loop of the program.
+ *
+ * This function is called repeatedly by the Arduino framework.
+ *
+ * It does the following:
+ * - Updates the port values every 1000ms (1 second).
+ * - Updates the MDNS service.
+ * - Checks the temperature.
+ * - Checks for OTA updates.
+ * - Checks for WebSocket messages.
+ */
 void loop()
 {
   static unsigned long lastUpdate = 0;
@@ -322,6 +334,7 @@ float lastTemperature = 0;
 void checkTemperature()
 {
   static unsigned long lastChecktime = 0;
+  static unsigned long lastChangeFanSpeed = 0;
   unsigned long currentTime = millis();
   if (currentTime - lastChecktime < kTimeToCheckTemperature)
   {
@@ -331,6 +344,13 @@ void checkTemperature()
   lastChecktime = currentTime;
   lastTemperature = Thermister(analogRead(TEMPERATURE_SENSOR_PIN));
   displayInfo();
+
+  if (currentTime - lastChangeFanSpeed < kTimeToChangeFan)
+  {
+    return;
+  }
+  
+  lastChangeFanSpeed = currentTime;
 
   float percent = (lastTemperature - kMinTemperature) / (kMaxTemperature - kMinTemperature);
     float totalPower = 0;
@@ -350,8 +370,12 @@ void checkTemperature()
   if (lastTemperature > kMinTemperature || pPercent > percent)
   {
     percent = max(pPercent, percent);
-
+    if (percent < 0.05) {
+      percent = 0.0;
+    }
     fanSpeed = min((int)(percent * 250), 250);
+  } else {
+    fanSpeed = 0;
   }
 
   analogWrite(FAN_PIN, fanSpeed);
