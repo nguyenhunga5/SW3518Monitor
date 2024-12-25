@@ -8,6 +8,7 @@ on:
 
 jobs:
   trigger-jenkins:
+    environment: JENKINS
     runs-on: ubuntu-latest
 
     steps:
