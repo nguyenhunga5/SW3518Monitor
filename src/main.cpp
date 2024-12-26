@@ -1,7 +1,6 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
-#include <Adafruit_SH1106.h>
 #include "LittleFS.h"
 #include <ArduinoJson.h>
 #include <ESPAsyncWiFiManager.h>
@@ -13,35 +12,47 @@
 #include <ESP8266WiFi.h>
 #include <DNSServer.h>
 #include <WebSocketsServer.h>
+#include <memory>
+#include <vector>
 
 #include "defines.h"
 #include "PortItem.h"
 #include "Config.h"
 
-#define SCREEN_WIDTH 128 // OLED display width, in pixels
-#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+constexpr int SCREEN_WIDTH = 128; // OLED display width, in pixels
+constexpr int SCREEN_HEIGHT = 64; // OLED display height, in pixels
 
-#define OLED_RESET LED_BUILTIN // 4
-#define SCREEN_ADDRESS 0x3C    ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
+constexpr int TCAADDR = 0x70;
 
-#define TCAADDR 0x70
+constexpr int TEMPERATURE_SENSOR_PIN = A0; // The ESP8266 pin ADC0
+constexpr int SCREEN_ADDRESS = 0x3D;    ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
 
-#define TEMPERATURE_SENSOR_PIN A0 // The ESP8266 pin ADC0
+#ifdef OLED_SSD1306
+#include <Adafruit_SSD1306.h>
+#define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
+#define PX_COLOR_WHITE SSD1306_WHITE
+#define PX_COLOR_BLACK SSD1306_BLACK
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+#else
+#include <Adafruit_SH110x.h>
+constexpr int OLED_RESET = LED_BUILTIN; // 4
+#define PX_COLOR_WHITE SH110X_WHITE
+#define PX_COLOR_BLACK SH110X_BLACK
+Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+#endif
 
-Adafruit_SH1106 display(OLED_RESET);
-
-AsyncWebServer *server;
+std::unique_ptr<AsyncWebServer> server = nullptr;
 // Create a WebSocket object
-WebSocketsServer webSocket = WebSocketsServer(81);
+WebSocketsServer webSocket(81);
 
-AsyncWiFiManager *wm = nullptr; // global wm instance
-DNSServer *dns;
+std::unique_ptr<AsyncWiFiManager> wm = nullptr; // global wm instance
+std::unique_ptr<DNSServer> dns = nullptr;
 
 // Create an array of ports (global variable)
-std::vector<PortItem *> ports;
+std::vector<std::unique_ptr<PortItem>> ports;
 
 // Config
-Config *config = nullptr;
+std::unique_ptr<Config> config = nullptr;
 
 // Is updating
 bool isUpdating = false;
@@ -62,6 +73,9 @@ void tcaselect(uint8_t channel)
 void buildServer();
 void setupI2C();
 void updateSwitch();
+
+void drawFunnyEmotion();
+void dimScreen();
 
 void setup()
 {
@@ -90,7 +104,7 @@ void setup()
   pinMode(SWITCH_PIN, OUTPUT);
   pinMode(SWITCH_BUTTON, INPUT);
 
-  config = new Config();
+  config = std::make_unique<Config>();
   // Force update switch state
   updateSwitch();
 
@@ -135,10 +149,10 @@ void setup()
 
   setupI2C();
 
-  server = new AsyncWebServer(80);
-  dns = new DNSServer();
+  server = std::make_unique<AsyncWebServer>(80);
+  dns = std::make_unique<DNSServer>();
   Serial.println("Building wifi manager");
-  wm = new AsyncWiFiManager(server, dns);
+  wm = std::make_unique<AsyncWiFiManager>(server.get(), dns.get());
 
   wm->setSaveConfigCallback([&]()
                             { buildServer(); });
@@ -215,12 +229,15 @@ void displayInfo()
   tcaselect(0);
   display.clearDisplay();
   display.setTextSize(1);
-  display.setTextColor(WHITE);
+  display.setTextColor(PX_COLOR_WHITE);
 
   // Header with scrolling text
   display.setCursor(0, 4);
   // I hope you do not remove my name
-  String headerText = "WS3518X " + String(FWVersion) + " by NguyenHungA5 IP: " + WiFi.localIP().toString() + "    "; // Extra spaces for smooth loop
+  String headerText = "WS3518X " + String(FWVersion);
+  headerText += " by NguyenHungA5 IP: " + WiFi.localIP().toString();
+  headerText += " | http://" + config->getServerName() + ".local";
+  headerText += "    "; // Extra spaces for smooth loop
 
   // Update scroll position every 200ms
   if (millis() - lastScrollTime > 200)
@@ -238,7 +255,23 @@ void displayInfo()
   display.println(displayText.substring(0, 21)); // Show only what fits on screen
 
   // Draw separator line
-  display.drawLine(0, 13, 128, 13, WHITE);
+  display.drawLine(0, 13, 128, 13, PX_COLOR_WHITE);
+
+  bool allPortsIdle = true;
+  for (const auto &port : ports)
+  {
+    if (port->current > 0.0)
+    {
+      allPortsIdle = false;
+      break;
+    }
+  }
+
+  if (allPortsIdle)
+  {
+    drawFunnyEmotion();
+    return;
+  }
 
   // Port information
   for (int i = 0; i < 4; i++)
@@ -400,7 +433,7 @@ void onOTAProgress(size_t current, size_t final)
     tcaselect(0);
     display.clearDisplay();
     display.setTextSize(1);
-    display.setTextColor(WHITE);
+    display.setTextColor(PX_COLOR_WHITE);
     int startY = 10;
     display.setCursor(0, startY);
     display.println("Updating...");
@@ -412,11 +445,14 @@ void onOTAProgress(size_t current, size_t final)
     int progressValue = map(current, 0, final, 0, progressWidth);
 
     String processText = String(progressValue) + "%";
-    display.setCursor((SCREEN_WIDTH - processText.length()) / 2, startY + 20);
+    int16_t textX, textY = 0;
+    uint16_t textWidth, textHeight = 0;
+    display.getTextBounds(processText.c_str(), 0, 0, &textX, &textY, &textWidth, &textHeight);
+    display.setCursor((SCREEN_WIDTH - textWidth) / 2, startY + 20);
     display.println(processText);
 
-    display.fillRect(progressX, progressY, progressWidth, progressHeight, BLACK);
-    display.fillRect(progressX, progressY, progressValue, progressHeight, WHITE);
+    display.fillRect(progressX, progressY, progressWidth, progressHeight, PX_COLOR_BLACK);
+    display.fillRect(progressX, progressY, progressValue, progressHeight, PX_COLOR_WHITE);
     display.display();
   }
 }
@@ -440,7 +476,7 @@ File uploadFile;
 void handleTextUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final);
 void buildServer()
 {
-  if (!MDNS.begin(kServerName))
+  if (!MDNS.begin(config->getServerName()))
   {
     Serial.println("Error setting up MDNS responder!");
   }
@@ -451,7 +487,7 @@ void buildServer()
     MDNS.addService("http", "tcp", 80);
   }
 
-  ElegantOTA.begin(server);
+  ElegantOTA.begin(server.get());
 
   // ElegantOTA callbacks
   ElegantOTA.onStart(onOTAStart);
@@ -508,7 +544,8 @@ void buildServer()
              {
         StaticJsonDocument<128> doc;
         doc["firmware"] = FWVersion;
-        
+        doc["serverName"] = config->getServerName();
+
         String response;
         serializeJson(doc, response);
         request->send(200, "application/json", response); });
@@ -554,6 +591,37 @@ void buildServer()
   server->on("/edit", HTTP_POST, [](AsyncWebServerRequest *request)
              { request->send(200, "text/plain", "File written successfully"); }, handleTextUpload);
 
+/*
+  // API to change server name
+  server->on("/serverName", HTTP_POST, [](AsyncWebServerRequest *request)
+             {
+               if (request->hasArg("serverName"))
+               {
+                 String newServerName = request->arg("serverName");
+                 config->setServerName(newServerName);
+                 MDNS.begin(newServerName.c_str());
+                 request->send(200, "application/json", "{\"status\":\"success\"}");
+               }
+               else
+               {
+                 request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Missing serverName parameter\"}");
+               }
+             });
+
+  // Serve the web form
+  server->on("/serverName", HTTP_GET, [](AsyncWebServerRequest *request)
+             {
+              StaticJsonDocument<128> doc;
+              doc["serverName"] = config->getServerName();
+
+              String response;
+              serializeJson(doc, response);
+              request->send(200, "application/json", response);
+             });
+*/
+  // Start server
+  server->begin();
+
   server->begin();
   Serial.println("HTTP server started");
 
@@ -567,14 +635,14 @@ void setupI2C()
 
   // Init OLED display on bus number 0
   tcaselect(0);
-  display.begin(SH1106_SWITCHCAPVCC, SCREEN_ADDRESS);
+  display.begin(SCREEN_ADDRESS, true);
 
   for (uint i = 0; i < 4; i++)
   {
     tcaselect(i + 1);
-    PortItem *item = new PortItem();
+    auto item = std::make_unique<PortItem>();
     item->update();
-    ports.push_back(item);
+    ports.push_back(std::move(item));
   }
 }
 
@@ -663,3 +731,132 @@ void handleTextUpload(AsyncWebServerRequest *request, String filename, size_t in
       }
     }
   }
+
+#include <cstdlib> // For rand() and srand()
+#include <ctime>   // For time()
+
+void drawFunnyEmotion()
+{
+  display.clearDisplay();
+  display.setTextSize(2);
+
+  // Seed the random number generator
+  srand(time(0));
+  int randomEmotion = rand() % 10; // Generate a random number between 0 and 9
+
+  switch (randomEmotion)
+  {
+  case 0:
+    // Draw a smiley face
+    display.drawCircle(64, 32, 20, PX_COLOR_WHITE); // Face outline
+    display.fillCircle(54, 24, 2, PX_COLOR_WHITE); // Left eye
+    display.fillCircle(74, 24, 2, PX_COLOR_WHITE); // Right eye
+    display.drawLine(54, 42, 74, 42, PX_COLOR_WHITE); // Smile
+    display.drawLine(54, 42, 64, 52, PX_COLOR_WHITE); // Smile
+    display.drawLine(64, 52, 74, 42, PX_COLOR_WHITE); // Smile
+    break;
+  case 1:
+    // Draw a sad face
+    display.drawCircle(64, 32, 20, PX_COLOR_WHITE); // Face outline
+    display.fillCircle(54, 24, 2, PX_COLOR_WHITE); // Left eye
+    display.fillCircle(74, 24, 2, PX_COLOR_WHITE); // Right eye
+    display.drawLine(54, 52, 74, 52, PX_COLOR_WHITE); // Frown
+    display.drawLine(54, 52, 64, 42, PX_COLOR_WHITE); // Frown
+    display.drawLine(64, 42, 74, 52, PX_COLOR_WHITE); // Frown
+    break;
+  case 2:
+    // Draw a laughing face
+    display.drawCircle(64, 32, 20, PX_COLOR_WHITE); // Face outline
+    display.fillCircle(54, 24, 2, PX_COLOR_WHITE); // Left eye
+    display.fillCircle(74, 24, 2, PX_COLOR_WHITE); // Right eye
+    display.drawLine(54, 42, 74, 42, PX_COLOR_WHITE); // Smile
+    display.drawLine(54, 42, 64, 52, PX_COLOR_WHITE); // Smile
+    display.drawLine(64, 52, 74, 42, PX_COLOR_WHITE); // Smile
+    display.drawLine(64, 52, 64, 62, PX_COLOR_WHITE); // Tongue
+    break;
+  case 3:
+    // Draw a surprised face
+    display.drawCircle(64, 32, 20, PX_COLOR_WHITE); // Face outline
+    display.fillCircle(54, 24, 2, PX_COLOR_WHITE); // Left eye
+    display.fillCircle(74, 24, 2, PX_COLOR_WHITE); // Right eye
+    display.drawCircle(64, 42, 5, PX_COLOR_WHITE); // Open mouth
+    break;
+  case 4:
+    // Draw a winking face
+    display.drawCircle(64, 32, 20, PX_COLOR_WHITE); // Face outline
+    display.fillCircle(54, 24, 2, PX_COLOR_WHITE); // Left eye
+    display.drawLine(72, 24, 76, 28, PX_COLOR_WHITE); // Right eye wink
+    display.drawLine(54, 42, 74, 42, PX_COLOR_WHITE); // Smile
+    display.drawLine(54, 42, 64, 52, PX_COLOR_WHITE); // Smile
+    display.drawLine(64, 52, 74, 42, PX_COLOR_WHITE); // Smile
+    break;
+  case 5:
+    // Draw a crying face
+    display.drawCircle(64, 32, 20, PX_COLOR_WHITE); // Face outline
+    display.fillCircle(54, 24, 2, PX_COLOR_WHITE); // Left eye
+    display.fillCircle(74, 24, 2, PX_COLOR_WHITE); // Right eye
+    display.drawLine(54, 52, 74, 52, PX_COLOR_WHITE); // Frown
+    display.drawLine(54, 52, 64, 42, PX_COLOR_WHITE); // Frown
+    display.drawLine(64, 42, 74, 52, PX_COLOR_WHITE); // Frown
+    display.drawLine(54, 26, 54, 36, PX_COLOR_WHITE); // Left tear
+    display.drawLine(74, 26, 74, 36, PX_COLOR_WHITE); // Right tear
+    break;
+  case 6:
+    // Draw a cool face
+    display.drawCircle(64, 32, 20, PX_COLOR_WHITE); // Face outline
+    display.drawLine(54, 24, 74, 24, PX_COLOR_WHITE); // Sunglasses top
+    display.drawLine(54, 24, 54, 28, PX_COLOR_WHITE); // Left sunglasses side
+    display.drawLine(74, 24, 74, 28, PX_COLOR_WHITE); // Right sunglasses side
+    display.drawLine(54, 28, 74, 28, PX_COLOR_WHITE); // Sunglasses bottom
+    display.drawLine(54, 42, 74, 42, PX_COLOR_WHITE); // Smile
+    display.drawLine(54, 42, 64, 52, PX_COLOR_WHITE); // Smile
+    display.drawLine(64, 52, 74, 42, PX_COLOR_WHITE); // Smile
+    break;
+  case 7:
+    // Draw a confused face
+    display.drawCircle(64, 32, 20, PX_COLOR_WHITE); // Face outline
+    display.fillCircle(54, 24, 2, PX_COLOR_WHITE); // Left eye
+    display.drawCircle(74, 24, 2, PX_COLOR_WHITE); // Right eye
+    display.drawLine(54, 52, 74, 52, PX_COLOR_WHITE); // Frown
+    display.drawLine(54, 52, 64, 42, PX_COLOR_WHITE); // Frown
+    display.drawLine(64, 42, 74, 52, PX_COLOR_WHITE); // Frown
+    break;
+  case 8:
+    // Draw a tongue out face
+    display.drawCircle(64, 32, 20, PX_COLOR_WHITE); // Face outline
+    display.fillCircle(54, 24, 2, PX_COLOR_WHITE); // Left eye
+    display.fillCircle(74, 24, 2, PX_COLOR_WHITE); // Right eye
+    display.drawLine(54, 42, 74, 42, PX_COLOR_WHITE); // Smile
+    display.drawLine(54, 42, 64, 52, PX_COLOR_WHITE); // Smile
+    display.drawLine(64, 52, 74, 42, PX_COLOR_WHITE); // Smile
+    display.drawLine(64, 52, 64, 62, PX_COLOR_WHITE); // Tongue
+    break;
+  case 9:
+    // Draw a heart eyes face
+    display.drawCircle(64, 32, 20, PX_COLOR_WHITE); // Face outline
+    display.drawLine(52, 22, 56, 26, PX_COLOR_WHITE); // Left heart top
+    display.drawLine(56, 22, 52, 26, PX_COLOR_WHITE); // Left heart bottom
+    display.drawLine(72, 22, 76, 26, PX_COLOR_WHITE); // Right heart top
+    display.drawLine(76, 22, 72, 26, PX_COLOR_WHITE); // Right heart bottom
+    display.drawLine(54, 42, 74, 42, PX_COLOR_WHITE); // Smile
+    display.drawLine(54, 42, 64, 52, PX_COLOR_WHITE); // Smile
+    display.drawLine(64, 52, 74, 42, PX_COLOR_WHITE); // Smile
+    break;
+  }
+
+  display.display();
+}
+
+unsigned long lastActivityTime = 0;
+int screenBrightness = 255;
+void dimScreen()
+{
+  unsigned long currentTime = millis();
+  if (currentTime - lastActivityTime > 10000)
+  {
+    screenBrightness = max(screenBrightness - 25, 0);
+    // display.setContrast(screenBrightness);
+    // display.dim(screenBrightness);
+    lastActivityTime = currentTime;
+  }
+}
