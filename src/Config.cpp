@@ -25,7 +25,7 @@ Config::~Config()
 
 void Config::saveConfig()
 {
-    Serial.println("Begin save configuration file");
+    // Serial.println("Begin save configuration file");
     // Create a JSON document to hold the configuration
     DynamicJsonDocument doc(256);
 
@@ -49,7 +49,7 @@ void Config::saveConfig()
     serializeJson(doc, configFile);
     configFile.close();
 
-    Serial.println("Save configuration file successfully");
+    // Serial.println("Save configuration file successfully");
 }
 
 bool Config::loadConfig()

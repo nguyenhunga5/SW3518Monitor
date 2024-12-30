@@ -18,6 +18,7 @@
 #include "defines.h"
 #include "PortItem.h"
 #include "Config.h"
+#include "Emoticons.hpp"
 
 constexpr int SCREEN_WIDTH = 128; // OLED display width, in pixels
 constexpr int SCREEN_HEIGHT = 64; // OLED display height, in pixels
@@ -25,11 +26,11 @@ constexpr int SCREEN_HEIGHT = 64; // OLED display height, in pixels
 constexpr int TCAADDR = 0x70;
 
 constexpr int TEMPERATURE_SENSOR_PIN = A0; // The ESP8266 pin ADC0
-constexpr int SCREEN_ADDRESS = 0x3D;    ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
+constexpr int SCREEN_ADDRESS = 0x3C;
 
 #ifdef OLED_SSD1306
 #include <Adafruit_SSD1306.h>
-#define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
+#define OLED_RESET -1 // Reset pin # (or -1 if sharing Arduino reset pin)
 #define PX_COLOR_WHITE SSD1306_WHITE
 #define PX_COLOR_BLACK SSD1306_BLACK
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
@@ -51,11 +52,19 @@ std::unique_ptr<DNSServer> dns = nullptr;
 // Create an array of ports (global variable)
 std::vector<std::unique_ptr<PortItem>> ports;
 
+// Create an array of emoticons
+std::unique_ptr<Emoticons> emoticons = nullptr;
+
 // Config
 std::unique_ptr<Config> config = nullptr;
 
 // Is updating
 bool isUpdating = false;
+int progressValue = 0;
+int progressWidth = 100;
+int progressHeight = 10;
+char updatingTitle[12] = "Updating...";
+void drawUpdateProgress();
 
 int fanSpeed = 0;
 
@@ -74,7 +83,7 @@ void buildServer();
 void setupI2C();
 void updateSwitch();
 
-void drawFunnyEmotion();
+bool drawFunnyEmotion();
 void dimScreen();
 
 void setup()
@@ -99,6 +108,8 @@ void setup()
 
       file = root.openNextFile();
     }
+
+    root.close();
   }
 
   pinMode(SWITCH_PIN, OUTPUT);
@@ -149,6 +160,9 @@ void setup()
 
   setupI2C();
 
+  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
+  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Content-Type");
   server = std::make_unique<AsyncWebServer>(80);
   dns = std::make_unique<DNSServer>();
   Serial.println("Building wifi manager");
@@ -158,7 +172,7 @@ void setup()
                             { buildServer(); });
 
   bool res;
-  res = wm->autoConnect();
+  res = wm->autoConnect(config->getServerName().c_str());
 
   if (!res)
   {
@@ -171,10 +185,14 @@ void setup()
     Serial.println("connected...yeey :)");
     buildServer();
   }
+
+  emoticons = std::make_unique<Emoticons>();
 }
 
 void checkTemperature();
 void updatePortValues();
+
+void debugMemory();
 
 /**
  * @brief The main loop of the program.
@@ -194,7 +212,9 @@ void loop()
   if (millis() - lastUpdate > 1000)
   { // Update every second
     lastUpdate = millis();
+    drawUpdateProgress();
     updatePortValues();
+    debugMemory();
   }
 
   MDNS.update();
@@ -222,7 +242,8 @@ unsigned long lastScrollTime = 0;
 uint8_t pageTime = 0;
 void displayInfo()
 {
-  if (isUpdating) {
+  if (isUpdating)
+  {
     return;
   }
 
@@ -267,9 +288,8 @@ void displayInfo()
     }
   }
 
-  if (allPortsIdle)
+  if (allPortsIdle && drawFunnyEmotion())
   {
-    drawFunnyEmotion();
     return;
   }
 
@@ -312,7 +332,7 @@ void displayInfo()
 
         // Check if the protocol text is too long
         if (protocolText.length() > 7)
-        { // Assuming 7 characters fit in the display
+        {                         // Assuming 7 characters fit in the display
           protocolText += "    "; // Extra spaces for smooth loop
           // Scroll the text
           static unsigned long lastScrollTime = 0;
@@ -382,32 +402,35 @@ void checkTemperature()
   {
     return;
   }
-  
+
   lastChangeFanSpeed = currentTime;
 
   float percent = (lastTemperature - kMinTemperature) / (kMaxTemperature - kMinTemperature);
-    float totalPower = 0;
-    if (ports.size() == 4)
+  float totalPower = 0;
+  if (ports.size() == 4)
+  {
+    for (size_t i = 0; i < 4; i++)
     {
-      for (size_t i = 0; i < 4; i++)
+      if (ports[i]->isActive)
       {
-        if (ports[i]->isActive)
-        {
-          totalPower += ports[i]->getPower();
-        }
+        totalPower += ports[i]->getPower();
       }
-    } 
-    
-    float pPercent = (totalPower - kMinPower) / (kMaxPower - kMinPower); // kMaxPower is power max per port, so we just estimate total power
+    }
+  }
+
+  float pPercent = (totalPower - kMinPower) / (kMaxPower - kMinPower); // kMaxPower is power max per port, so we just estimate total power
 
   if (lastTemperature > kMinTemperature || pPercent > percent)
   {
     percent = max(pPercent, percent);
-    if (percent < 0.05) {
+    if (percent < 0.05)
+    {
       percent = 0.0;
     }
     fanSpeed = min((int)(percent * 250), 250);
-  } else {
+  }
+  else
+  {
     fanSpeed = 0;
   }
 
@@ -428,32 +451,9 @@ void onOTAProgress(size_t current, size_t final)
   if (millis() - ota_progress_millis > 1000)
   {
     ota_progress_millis = millis();
-    Serial.printf("OTA Progress Current: %u bytes, Final: %u bytes\n", current, final);
+    progressValue = map(current, 0, final, 0, progressWidth);
 
-    tcaselect(0);
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(PX_COLOR_WHITE);
-    int startY = 10;
-    display.setCursor(0, startY);
-    display.println("Updating...");
-
-    int progressWidth = 100;
-    int progressHeight = 10;
-    int progressX = (SCREEN_WIDTH - progressWidth) / 2;
-    int progressY = startY + 30;
-    int progressValue = map(current, 0, final, 0, progressWidth);
-
-    String processText = String(progressValue) + "%";
-    int16_t textX, textY = 0;
-    uint16_t textWidth, textHeight = 0;
-    display.getTextBounds(processText.c_str(), 0, 0, &textX, &textY, &textWidth, &textHeight);
-    display.setCursor((SCREEN_WIDTH - textWidth) / 2, startY + 20);
-    display.println(processText);
-
-    display.fillRect(progressX, progressY, progressWidth, progressHeight, PX_COLOR_BLACK);
-    display.fillRect(progressX, progressY, progressValue, progressHeight, PX_COLOR_WHITE);
-    display.display();
+    debugMemory();
   }
 }
 
@@ -482,7 +482,9 @@ void buildServer()
   }
   else
   {
-    Serial.println("mDNS responder started");
+    logMessage("mDNS responder started", true);
+    String message = "You can access the web interface at http://" + config->getServerName() + ".local or http://" + WiFi.localIP().toString();
+    logMessage(message, true);
     // Add service to MDNS-SD
     MDNS.addService("http", "tcp", 80);
   }
@@ -557,8 +559,7 @@ void buildServer()
 
         String response;
         serializeJson(doc, response);
-        request->send(200, "application/json", response);
-  });
+        request->send(200, "application/json", response); });
 
   server->on("/state", HTTP_POST, [](AsyncWebServerRequest *request)
              {
@@ -570,8 +571,7 @@ void buildServer()
         }
 
         updateSwitch();
-        request->send(200, "application/json", "State updated");
-  });
+        request->send(200, "application/json", "State updated"); });
 
   server->on("/reset_energy", HTTP_POST, [](AsyncWebServerRequest *request)
              {
@@ -581,44 +581,43 @@ void buildServer()
         request->send(200, "application/json", "State updated"); });
 
   server->on("/edit", HTTP_GET, [](AsyncWebServerRequest *request)
-             {
-        request->send(LittleFS, "/edit.html", "text/html");
-  });
+             { request->send(LittleFS, "/edit.html", "text/html"); });
 
   server->on("/edit_content", HTTP_GET, [](AsyncWebServerRequest *request)
              { request->send(LittleFS, "/index.html", "text/html"); });
 
   server->on("/edit", HTTP_POST, [](AsyncWebServerRequest *request)
              { request->send(200, "text/plain", "File written successfully"); }, handleTextUpload);
+  emoticons->addListener(server.get());
 
-/*
-  // API to change server name
-  server->on("/serverName", HTTP_POST, [](AsyncWebServerRequest *request)
-             {
-               if (request->hasArg("serverName"))
+  /*
+    // API to change server name
+    server->on("/serverName", HTTP_POST, [](AsyncWebServerRequest *request)
                {
-                 String newServerName = request->arg("serverName");
-                 config->setServerName(newServerName);
-                 MDNS.begin(newServerName.c_str());
-                 request->send(200, "application/json", "{\"status\":\"success\"}");
-               }
-               else
+                 if (request->hasArg("serverName"))
+                 {
+                   String newServerName = request->arg("serverName");
+                   config->setServerName(newServerName);
+                   MDNS.begin(newServerName.c_str());
+                   request->send(200, "application/json", "{\"status\":\"success\"}");
+                 }
+                 else
+                 {
+                   request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Missing serverName parameter\"}");
+                 }
+               });
+
+    // Serve the web form
+    server->on("/serverName", HTTP_GET, [](AsyncWebServerRequest *request)
                {
-                 request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Missing serverName parameter\"}");
-               }
-             });
+                StaticJsonDocument<128> doc;
+                doc["serverName"] = config->getServerName();
 
-  // Serve the web form
-  server->on("/serverName", HTTP_GET, [](AsyncWebServerRequest *request)
-             {
-              StaticJsonDocument<128> doc;
-              doc["serverName"] = config->getServerName();
-
-              String response;
-              serializeJson(doc, response);
-              request->send(200, "application/json", response);
-             });
-*/
+                String response;
+                serializeJson(doc, response);
+                request->send(200, "application/json", response);
+               });
+  */
   // Start server
   server->begin();
 
@@ -635,8 +634,11 @@ void setupI2C()
 
   // Init OLED display on bus number 0
   tcaselect(0);
+#ifdef OLED_SSD1306
+  display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS);
+#else
   display.begin(SCREEN_ADDRESS, true);
-
+#endif
   for (uint i = 0; i < 4; i++)
   {
     tcaselect(i + 1);
@@ -679,12 +681,17 @@ void notifyClients(String data)
   webSocket.broadcastTXT(data);
 }
 
-void logMessage(const String &message)
+void logMessage(const String &message, bool sendToSerial)
 {
   notifyClients(message); // Send message to all connected WebSocket clients
+  if (sendToSerial)
+  {
+    Serial.println(message); // Send message to the serial monitor
+  }
 }
 
-void updateSwitch() {
+void updateSwitch()
+{
   digitalWrite(SWITCH_PIN, config->getState());
   String stateStr = config->getState() ? "On" : "Off";
   logMessage("Update state to => " + stateStr);
@@ -693,158 +700,61 @@ void updateSwitch() {
 // Handle large file upload
 void handleTextUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
 {
-    if (index == 0)
+  if (index == 0)
+  {
+    // First chunk of data, open the file
+    logMessage("Starting text upload");
+    if (LittleFS.exists("/index.html"))
     {
-      // First chunk of data, open the file
-      logMessage("Starting text upload");
-      if (LittleFS.exists("/index.html"))
-      {
-        LittleFS.remove("/index.html"); // Remove the existing file if it exists
-      }
-      uploadFile = LittleFS.open("/index.html", "w");
-      if (!uploadFile)
-      {
-        logMessage("Failed to open file for writing");
-        request->send(500, "text/plain", "Failed to open file for writing");
-        return;
-      }
+      LittleFS.remove("/index.html"); // Remove the existing file if it exists
     }
+    uploadFile = LittleFS.open("/index.html", "w");
+    if (!uploadFile)
+    {
+      logMessage("Failed to open file for writing");
+      request->send(500, "text/plain", "Failed to open file for writing");
+      return;
+    }
+  }
 
-    // Write the current chunk to the file
+  // Write the current chunk to the file
+  if (uploadFile)
+  {
+    uploadFile.write(data, len);
+    logMessage("Written " + String(len) + " bytes");
+  }
+  else
+  {
+    logMessage("File not open during write");
+  }
+
+  if (final)
+  {
+    // All chunks received
+    logMessage("Html upload complete");
     if (uploadFile)
     {
-      uploadFile.write(data, len);
-      logMessage("Written " + String(len) + " bytes");
-    }
-    else
-    {
-      logMessage("File not open during write");
-    }
-
-    if (final)
-    {
-      // All chunks received
-      logMessage("Html upload complete");
-      if (uploadFile)
-      {
-        uploadFile.close();
-      }
+      uploadFile.close();
     }
   }
+}
 
-#include <cstdlib> // For rand() and srand()
-#include <ctime>   // For time()
-
-void drawFunnyEmotion()
+File root = LittleFS.open("/*.emo", "r");
+bool drawFunnyEmotion()
 {
-  display.clearDisplay();
-  display.setTextSize(2);
 
-  // Seed the random number generator
-  srand(time(0));
-  int randomEmotion = rand() % 10; // Generate a random number between 0 and 9
-
-  switch (randomEmotion)
+  if (isUpdating)
   {
-  case 0:
-    // Draw a smiley face
-    display.drawCircle(64, 32, 20, PX_COLOR_WHITE); // Face outline
-    display.fillCircle(54, 24, 2, PX_COLOR_WHITE); // Left eye
-    display.fillCircle(74, 24, 2, PX_COLOR_WHITE); // Right eye
-    display.drawLine(54, 42, 74, 42, PX_COLOR_WHITE); // Smile
-    display.drawLine(54, 42, 64, 52, PX_COLOR_WHITE); // Smile
-    display.drawLine(64, 52, 74, 42, PX_COLOR_WHITE); // Smile
-    break;
-  case 1:
-    // Draw a sad face
-    display.drawCircle(64, 32, 20, PX_COLOR_WHITE); // Face outline
-    display.fillCircle(54, 24, 2, PX_COLOR_WHITE); // Left eye
-    display.fillCircle(74, 24, 2, PX_COLOR_WHITE); // Right eye
-    display.drawLine(54, 52, 74, 52, PX_COLOR_WHITE); // Frown
-    display.drawLine(54, 52, 64, 42, PX_COLOR_WHITE); // Frown
-    display.drawLine(64, 42, 74, 52, PX_COLOR_WHITE); // Frown
-    break;
-  case 2:
-    // Draw a laughing face
-    display.drawCircle(64, 32, 20, PX_COLOR_WHITE); // Face outline
-    display.fillCircle(54, 24, 2, PX_COLOR_WHITE); // Left eye
-    display.fillCircle(74, 24, 2, PX_COLOR_WHITE); // Right eye
-    display.drawLine(54, 42, 74, 42, PX_COLOR_WHITE); // Smile
-    display.drawLine(54, 42, 64, 52, PX_COLOR_WHITE); // Smile
-    display.drawLine(64, 52, 74, 42, PX_COLOR_WHITE); // Smile
-    display.drawLine(64, 52, 64, 62, PX_COLOR_WHITE); // Tongue
-    break;
-  case 3:
-    // Draw a surprised face
-    display.drawCircle(64, 32, 20, PX_COLOR_WHITE); // Face outline
-    display.fillCircle(54, 24, 2, PX_COLOR_WHITE); // Left eye
-    display.fillCircle(74, 24, 2, PX_COLOR_WHITE); // Right eye
-    display.drawCircle(64, 42, 5, PX_COLOR_WHITE); // Open mouth
-    break;
-  case 4:
-    // Draw a winking face
-    display.drawCircle(64, 32, 20, PX_COLOR_WHITE); // Face outline
-    display.fillCircle(54, 24, 2, PX_COLOR_WHITE); // Left eye
-    display.drawLine(72, 24, 76, 28, PX_COLOR_WHITE); // Right eye wink
-    display.drawLine(54, 42, 74, 42, PX_COLOR_WHITE); // Smile
-    display.drawLine(54, 42, 64, 52, PX_COLOR_WHITE); // Smile
-    display.drawLine(64, 52, 74, 42, PX_COLOR_WHITE); // Smile
-    break;
-  case 5:
-    // Draw a crying face
-    display.drawCircle(64, 32, 20, PX_COLOR_WHITE); // Face outline
-    display.fillCircle(54, 24, 2, PX_COLOR_WHITE); // Left eye
-    display.fillCircle(74, 24, 2, PX_COLOR_WHITE); // Right eye
-    display.drawLine(54, 52, 74, 52, PX_COLOR_WHITE); // Frown
-    display.drawLine(54, 52, 64, 42, PX_COLOR_WHITE); // Frown
-    display.drawLine(64, 42, 74, 52, PX_COLOR_WHITE); // Frown
-    display.drawLine(54, 26, 54, 36, PX_COLOR_WHITE); // Left tear
-    display.drawLine(74, 26, 74, 36, PX_COLOR_WHITE); // Right tear
-    break;
-  case 6:
-    // Draw a cool face
-    display.drawCircle(64, 32, 20, PX_COLOR_WHITE); // Face outline
-    display.drawLine(54, 24, 74, 24, PX_COLOR_WHITE); // Sunglasses top
-    display.drawLine(54, 24, 54, 28, PX_COLOR_WHITE); // Left sunglasses side
-    display.drawLine(74, 24, 74, 28, PX_COLOR_WHITE); // Right sunglasses side
-    display.drawLine(54, 28, 74, 28, PX_COLOR_WHITE); // Sunglasses bottom
-    display.drawLine(54, 42, 74, 42, PX_COLOR_WHITE); // Smile
-    display.drawLine(54, 42, 64, 52, PX_COLOR_WHITE); // Smile
-    display.drawLine(64, 52, 74, 42, PX_COLOR_WHITE); // Smile
-    break;
-  case 7:
-    // Draw a confused face
-    display.drawCircle(64, 32, 20, PX_COLOR_WHITE); // Face outline
-    display.fillCircle(54, 24, 2, PX_COLOR_WHITE); // Left eye
-    display.drawCircle(74, 24, 2, PX_COLOR_WHITE); // Right eye
-    display.drawLine(54, 52, 74, 52, PX_COLOR_WHITE); // Frown
-    display.drawLine(54, 52, 64, 42, PX_COLOR_WHITE); // Frown
-    display.drawLine(64, 42, 74, 52, PX_COLOR_WHITE); // Frown
-    break;
-  case 8:
-    // Draw a tongue out face
-    display.drawCircle(64, 32, 20, PX_COLOR_WHITE); // Face outline
-    display.fillCircle(54, 24, 2, PX_COLOR_WHITE); // Left eye
-    display.fillCircle(74, 24, 2, PX_COLOR_WHITE); // Right eye
-    display.drawLine(54, 42, 74, 42, PX_COLOR_WHITE); // Smile
-    display.drawLine(54, 42, 64, 52, PX_COLOR_WHITE); // Smile
-    display.drawLine(64, 52, 74, 42, PX_COLOR_WHITE); // Smile
-    display.drawLine(64, 52, 64, 62, PX_COLOR_WHITE); // Tongue
-    break;
-  case 9:
-    // Draw a heart eyes face
-    display.drawCircle(64, 32, 20, PX_COLOR_WHITE); // Face outline
-    display.drawLine(52, 22, 56, 26, PX_COLOR_WHITE); // Left heart top
-    display.drawLine(56, 22, 52, 26, PX_COLOR_WHITE); // Left heart bottom
-    display.drawLine(72, 22, 76, 26, PX_COLOR_WHITE); // Right heart top
-    display.drawLine(76, 22, 72, 26, PX_COLOR_WHITE); // Right heart bottom
-    display.drawLine(54, 42, 74, 42, PX_COLOR_WHITE); // Smile
-    display.drawLine(54, 42, 64, 52, PX_COLOR_WHITE); // Smile
-    display.drawLine(64, 52, 74, 42, PX_COLOR_WHITE); // Smile
-    break;
+    return false;
   }
 
-  display.display();
+  static unsigned long lastDrawTime = 0;
+  if (millis() - lastDrawTime < 2000)
+  {
+    return true;
+  }
+  lastDrawTime = millis();
+  return emoticons->draw(&display, SCREEN_WIDTH, SCREEN_HEIGHT, PX_COLOR_WHITE, PX_COLOR_BLACK);
 }
 
 unsigned long lastActivityTime = 0;
@@ -859,4 +769,48 @@ void dimScreen()
     // display.dim(screenBrightness);
     lastActivityTime = currentTime;
   }
+}
+
+const int lowMemoryThreshold = 2000; // Alert if free heap is below 2000 bytes
+void debugMemory()
+{
+  size_t freeHeap = ESP.getFreeHeap();
+  Serial.print("Free Heap: ");
+  Serial.println(freeHeap);
+
+  if (freeHeap < lowMemoryThreshold)
+  {
+    Serial.println("WARNING: Low memory!");
+  }
+}
+
+void drawUpdateProgress()
+{
+  if (!isUpdating)
+  {
+    return;
+  }
+
+  tcaselect(0);
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(PX_COLOR_WHITE);
+  int startY = 10;
+  display.setCursor(0, startY);
+  display.println(updatingTitle);
+  display.display();
+
+  int progressX = (SCREEN_WIDTH - progressWidth) / 2;
+  int progressY = 40;
+
+  String processText = String(progressValue) + "%";
+  int16_t textX, textY = 0;
+  uint16_t textWidth, textHeight = 0;
+  display.getTextBounds(processText.c_str(), 0, 0, &textX, &textY, &textWidth, &textHeight);
+  display.setCursor((SCREEN_WIDTH - textWidth) / 2, startY + 20);
+  display.println(processText);
+
+  display.fillRect(progressX, progressY, progressWidth, progressHeight, PX_COLOR_BLACK);
+  display.fillRect(progressX, progressY, progressValue, progressHeight, PX_COLOR_WHITE);
+  display.display();
 }

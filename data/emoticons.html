@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emoticon Editor for SW351x Monitor</title>
+    <style>
+        /* CSS Reset */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            padding: 20px;
+        }
+
+        h1 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(128, 5px);
+            grid-template-rows: repeat(64, 5px);
+            gap: 1px;
+            margin-bottom: 20px;
+        }
+
+        .pixel {
+            width: 5px;
+            height: 5px;
+            background-color: white;
+            border: 1px solid #ccc;
+        }
+
+        .pixel.active {
+            background-color: black;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        button:disabled {
+            background-color: #ccc;
+            color: #666;
+            cursor: not-allowed;
+        }
+
+        .button_delete {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            background-color: #dc3545;
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        input[type="text"],
+        input[type="file"],
+        input[type="range"] {
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+
+        input[type="range"] {
+            width: 100px;
+        }
+
+        label,
+        span {
+            font-size: 16px;
+            color: #333;
+        }
+
+        .emoticon-list {
+            margin-top: 20px;
+            width: 100%;
+            max-width: 600px;
+        }
+
+        .emoticon-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            background-color: white;
+        }
+
+        .emoticon-item button {
+            padding: 5px 10px;
+            background-color: #28a745;
+            border: none;
+            border-radius: 5px;
+            color: white;
+            cursor: pointer;
+        }
+
+        .emoticon-item button:hover {
+            background-color: #218838;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Emoticon Editor for SW351x Monitor</h1>
+    <div class="grid" id="grid"></div>
+    <div class="controls">
+        <button onclick="clearGrid()">Clear</button>
+        <input type="text" id="emoticonName" placeholder="Enter Emoticon Name">
+        <button onclick="saveEmoticon()">Save</button>
+        <input id="loadButton" type="file">
+        <label for="threshold" id="thresholdLabel">Threshold: 64</label>
+        <input type="range" id="threshold" name="threshold" min="0" max="255" value="64">
+        <button id="generateButton" onclick="generateEmoticon()">Generate</button>
+    </div>
+    <div class="emoticon-list" id="emoticonList"></div>
+    <script>
+        const grid = document.getElementById('grid');
+        const thresholdInput = document.getElementById('threshold');
+        const thresholdValue = document.getElementById('thresholdLabel');
+        const generateButton = document.getElementById('generateButton');
+        const emoticonList = document.getElementById('emoticonList');
+        const fileNameEl = document.getElementById('emoticonName');
+        generateButton.disabled = true;
+
+        for (let i = 0; i < 128 * 64; i++) {
+            const pixel = document.createElement('div');
+            pixel.classList.add('pixel');
+            pixel.addEventListener('click', () => {
+                pixel.classList.toggle('active');
+            });
+            grid.appendChild(pixel);
+        }
+
+        let isMouseDown = false;
+        let isActive = false;
+
+        grid.addEventListener('mousedown', () => {
+            isMouseDown = true;
+            const pixel = event.target;
+            isActive = !pixel.classList.contains('active');
+        });
+
+        grid.addEventListener('mouseup', () => {
+            isMouseDown = false;
+        });
+
+        grid.addEventListener('mouseleave', () => {
+            // isMouseDown = false;
+        });
+
+        grid.addEventListener('mousemove', (event) => {
+            const pixel = event.target;
+            if (!isMouseDown) {
+                return;
+            }
+
+            if (pixel.classList.contains('pixel')) {
+                pixel.classList.toggle('active', isActive);
+            }
+
+        });
+
+        thresholdInput.addEventListener('input', () => {
+            thresholdValue.textContent = 'Threshold: ' + thresholdInput.value;
+        });
+
+        function clearGrid() {
+            document.querySelectorAll('.pixel').forEach(pixel => pixel.classList.remove('active'));
+        }
+
+        function convertStrToEmoticonByte(str) {
+            const byteArray = [];
+            for (let i = 0; i < str.length; i += 8) {
+                const byte = str.slice(i, i + 8);
+                byteArray.push(parseInt(byte, 2));
+            }
+            return byteArray;
+        }
+
+        function saveEmoticon() {
+            if (!fileNameEl.value) {
+                alert('Please enter the emoticon name');
+                return;
+            }
+
+            const pixels = document.querySelectorAll('.pixel');
+            const emoticonData = [];
+            pixels.forEach(pixel => {
+                emoticonData.push(pixel.classList.contains('active') ? 1 : 0);
+            });
+            let fileName = fileNameEl.value + '.emo';
+            const binaryData = emoticonData.join('');
+            const byteArray = convertStrToEmoticonByte(binaryData);
+            const blob = new Blob([new Uint8Array(byteArray)], { type: 'application/octet-stream' });
+            const newFile = new File([blob], fileName, { type: 'application/octet-stream' });
+            const formData = new FormData();
+            formData.append('file', newFile);
+            fetch('/emoticons', {
+                method: 'POST',
+                body: formData, // FormData automatically sets the correct headers
+            }).then(response => {
+                if (response.ok) {
+                    alert('Emoticon saved successfully');
+                    fetchEmoticons(); // Refresh the emoticon list
+                } else {
+                    alert('Failed to save the emoticon');
+                }
+            }).catch(error => {
+                console.error('An error occurred while saving the emoticon:', error);
+                alert('Failed to save the emoticon');
+            });
+        }
+
+        function loadEmoticon(emoticonData) {
+            const pixels = document.querySelectorAll('.pixel');
+            emoticonData.forEach((bit, index) => {
+                if (bit === 1) {
+                    pixels[index].classList.add('active');
+                } else {
+                    pixels[index].classList.remove('active');
+                }
+            });
+        }
+
+        function loadEmoticonFromFile(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const arrayBuffer = e.target.result;
+                const byteArray = new Uint8Array(arrayBuffer);
+                const binaryData = Array.from(byteArray).map(byte => byte.toString(2).padStart(8, '0')).join('');
+                const emoticonData = binaryData.split('').map(bit => parseInt(bit, 10));
+                loadEmoticon(emoticonData);
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function generateEmoticon() {
+            const threshold = parseInt(thresholdInput.value, 10);
+            const file = document.getElementById('loadButton').files[0];
+            if (!file.name.endsWith('emo')) {
+                const formData = new FormData();
+                formData.append('image', file);
+                formData.append('threshold', threshold);
+
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', 'https://tonyapps.store/images', true);
+
+                xhr.responseType = 'blob'; // Ensure the response is handled as a blob
+
+                xhr.onload = async function () {
+                    if (xhr.status === 200) {
+                        // Create a file from the blob response
+                        const bodyText = await xhr.response.text();
+
+                        const byteArray = convertStrToEmoticonByte(bodyText);
+                        const blob = new Blob([new Uint8Array(byteArray)], { type: 'application/octet-stream' });
+                        const newFile = new File([blob], 'emoticon.emo', { type: 'application/octet-stream' });
+                        loadEmoticonFromFile(newFile);
+
+                    } else {
+                        console.error('Failed to upload the image:', xhr.status, xhr.statusText);
+                    }
+                };
+
+                xhr.onerror = function () {
+                    console.error('An error occurred while sending the request.');
+                };
+
+                // Send the request
+                xhr.send(formData);
+
+                return;
+            }
+
+            loadEmoticonFromFile(file);
+        }
+
+        document.getElementById('loadButton').addEventListener('change', (event) => {
+            const file = event.target.files[0];
+
+            if (!file.name.endsWith('emo')) {
+                generateButton.disabled = false;
+                generateEmoticon();
+                return;
+            }
+
+            loadEmoticonFromFile(file);
+            generateButton.disabled = true;
+        });
+
+        // Function to load the emoticon from the server
+        function loadEmoticonFromServer(fileName) {
+            fetch(`/emoticons_get?file=${fileName}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch emoticon');
+                    }
+                    return response.blob();
+                })
+                .then(blob => {
+                    const file = new File([blob], `${fileName}.emo`, { type: 'application/octet-stream' });
+                    loadEmoticonFromFile(file); // Your existing function to handle the file
+
+                    fileNameEl.value = fileName.replace('.emo', ''); // Set the file name in the input field without extension
+                })
+                .catch(error => {
+                    console.error('Error loading emoticon:', error);
+                });
+        }
+
+        // Function to delete the emoticon on the server
+        function deleteEmoticon(fileName) {
+            if (confirm(`Are you sure you want to delete ${fileName}?`)) {
+                fetch(`/emoticons_delete?file=${fileName}`, {
+                    method: 'DELETE',
+                })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Failed to delete emoticon');
+                        }
+                        console.log(`${fileName} deleted successfully`);
+                        document.getElementById(fileName).remove(); // Remove the item from the DOM
+                    })
+                    .catch(error => {
+                        console.error('Error deleting emoticon:', error);
+                    });
+            }
+        }
+
+        // Function download emoticon
+        function downloadEmoticon(fileName) {
+            fetch(`/emoticons_get?file=${fileName}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch emoticon');
+                    }
+                    return response.blob();
+                })
+                .then(blob => {
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${fileName.replace('/', '')}`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                })
+                .catch(error => {
+                    console.error('Error downloading emoticon:', error);
+                });
+        }
+
+        // Function to fetch the list of emoticons from the server
+        function fetchEmoticons() {
+            fetch('/emoticons_list')
+                .then(response => response.json())
+                .then(data => {
+                    emoticonList.innerHTML = '';
+                    data.forEach(emoticon => {
+                        const emoticonItem = document.createElement('div');
+                        emoticonItem.id = emoticon;
+                        emoticonItem.classList.add('emoticon-item');
+                        emoticonItem.innerHTML = `
+                            <span>${emoticon}</span>
+                            <div style="display: flex; gap: 10px;">
+                                <button onclick="loadEmoticonFromServer('${emoticon}')">Load</button>
+                                <button onclick="downloadEmoticon('${emoticon}')">Download</button>
+                                <button style="background-color: #dc3545" onclick="deleteEmoticon('${emoticon}')">Delete</button>
+                            </div>
+                        `;
+                        emoticonList.appendChild(emoticonItem);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error fetching emoticons:', error);
+                });
+        }
+
+        // Fetch emoticons on page load
+        fetchEmoticons();
+    </script>
+</body>
+
+</html>

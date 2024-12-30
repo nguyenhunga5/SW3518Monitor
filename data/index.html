@@ -1067,7 +1067,7 @@
                 // Update the version in title and header
                 const versionNumber = data.firmware || 'Unknown';
                 const versionText = versionNumber.startsWith('v') ? versionNumber : `v${versionNumber}`;
-                //const serverName = data.serverName || 'WS3518x Monitor';
+                const serverName = 'WS3518x Monitor';//data.serverName || 'WS3518x Monitor';
                 document.title = `${serverName} (${versionText}) by NguyenHungA5`;
                 document.getElementById('version').textContent = versionText;
                 //document.getElementById('main-title').textContent = serverName;
