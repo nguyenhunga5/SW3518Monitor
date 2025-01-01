@@ -67,7 +67,7 @@ char updatingTitle[12] = "Updating...";
 void drawUpdateProgress();
 
 int fanSpeed = 0;
-
+float lastTemperature = 0;
 // Helper function for changing TCA output channel
 void tcaselect(uint8_t channel)
 {
@@ -255,7 +255,7 @@ void displayInfo()
   // Header with scrolling text
   display.setCursor(0, 4);
   // I hope you do not remove my name
-  String headerText = "WS3518X " + String(FWVersion);
+  String headerText = "SW3518X " + String(FWVersion);
   headerText += " by NguyenHungA5 IP: " + WiFi.localIP().toString();
   headerText += " | http://" + config->getServerName() + ".local";
   headerText += "    "; // Extra spaces for smooth loop
@@ -273,7 +273,10 @@ void displayInfo()
 
   // Create scrolling effect by showing a window of the text
   String displayText = headerText.substring(scrollPosition) + headerText.substring(0, scrollPosition);
-  display.println(displayText.substring(0, 21)); // Show only what fits on screen
+  display.print(displayText.substring(0, 15)); // Show only what fits on screen
+  display.setCursor(86, 4);
+  String tempStr = " |" + String(lastTemperature, 1) + "C";
+  display.println(tempStr);
 
   // Draw separator line
   display.drawLine(0, 13, 128, 13, PX_COLOR_WHITE);
@@ -383,7 +386,6 @@ void displayInfo()
   display.display();
 }
 
-float lastTemperature = 0;
 void checkTemperature()
 {
   static unsigned long lastChecktime = 0;
