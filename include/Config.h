@@ -3,6 +3,7 @@
 
 #pragma once
 #include <Arduino.h>
+#include <OneButton.h>
 #include "defines.h"
 
 class Config
@@ -16,6 +17,11 @@ public:
     float totalEnergy3 = 0;
     float totalEnergy4 = 0;
 
+    OneButton *button = nullptr;
+    callbackFunction buttonClickedCallback = NULL;
+    callbackFunction buttonDoubleClickedCallback = NULL;
+    callbackFunction buttonLongPressedCallback = NULL;
+
     void saveConfig();
     bool loadConfig();
     // Port 0 -> 1
@@ -28,6 +34,10 @@ public:
 
     void setServerName(String name);
     String getServerName();
+    void buttonClicked();
+    void buttonDoubleClicked();
+    void buttonLongPressed();
+    void loop();
 
 private:
     bool state = true;

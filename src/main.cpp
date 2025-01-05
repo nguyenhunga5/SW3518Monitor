@@ -4,7 +4,6 @@
 #include "LittleFS.h"
 #include <ArduinoJson.h>
 #include <ESPAsyncWiFiManager.h>
-#include <OneButton.h>
 #include <ESP8266mDNS.h>
 #include <Ticker.h>
 #include <ESPAsyncWebServer.h>
@@ -60,6 +59,7 @@ std::unique_ptr<Config> config = nullptr;
 
 // Is updating
 bool isUpdating = false;
+bool isUpdateSuccess = false;
 int progressValue = 0;
 int progressWidth = 100;
 int progressHeight = 10;
@@ -118,7 +118,7 @@ void setup()
   config = std::make_unique<Config>();
   // Force update switch state
   updateSwitch();
-
+  ElegantOTA.setAutoReboot(false);
   byte error, address;
   int nDevices;
 
@@ -187,6 +187,15 @@ void setup()
   }
 
   emoticons = std::make_unique<Emoticons>();
+  config->buttonClickedCallback = []{
+    updateSwitch();
+    logMessage("Button click");
+  };
+
+  config->buttonLongPressedCallback = []{
+    wm->resetSettings();
+    logMessage("Button Long Pressed!");
+  };
 }
 
 void checkTemperature();
@@ -208,6 +217,7 @@ void debugMemory();
  */
 void loop()
 {
+  config->loop();
   static unsigned long lastUpdate = 0;
   if (millis() - lastUpdate > 1000)
   { // Update every second
@@ -242,7 +252,7 @@ unsigned long lastScrollTime = 0;
 uint8_t pageTime = 0;
 void displayInfo()
 {
-  if (isUpdating)
+  if (isUpdating || !digitalRead(SWITCH_BUTTON))
   {
     return;
   }
@@ -444,6 +454,7 @@ void onOTAStart()
   // Log when OTA has started
   Serial.println("OTA update started!");
   isUpdating = true;
+  isUpdateSuccess = false;
 }
 
 unsigned long ota_progress_millis = 0;
@@ -465,10 +476,12 @@ void onOTAEnd(bool success)
   if (success)
   {
     Serial.println("OTA update finished successfully!");
+    isUpdateSuccess = true;
   }
   else
   {
     Serial.println("There was an error during OTA update!");
+    isUpdating = false;
   }
   // <Add your own code here>
 }
@@ -629,18 +642,23 @@ void buildServer()
   webSocket.begin();
 }
 
+void setupDisplay() {
+  // Init OLED display on bus number 0
+  tcaselect(0);
+  #ifdef OLED_SSD1306
+    display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS);
+  #else
+    display.begin(SCREEN_ADDRESS, true);
+  #endif
+}
+
 void setupI2C()
 {
   // Start I2C communication with the Multiplexer
   Wire.begin();
 
-  // Init OLED display on bus number 0
-  tcaselect(0);
-#ifdef OLED_SSD1306
-  display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS);
-#else
-  display.begin(SCREEN_ADDRESS, true);
-#endif
+  setupDisplay();
+  
   for (uint i = 0; i < 4; i++)
   {
     tcaselect(i + 1);
@@ -697,6 +715,12 @@ void updateSwitch()
   digitalWrite(SWITCH_PIN, config->getState());
   String stateStr = config->getState() ? "On" : "Off";
   logMessage("Update state to => " + stateStr);
+  if (config->getState())
+  {
+    delay(150);
+    setupDisplay();
+  }
+  
 }
 
 // Handle large file upload
@@ -777,12 +801,11 @@ const int lowMemoryThreshold = 2000; // Alert if free heap is below 2000 bytes
 void debugMemory()
 {
   size_t freeHeap = ESP.getFreeHeap();
-  Serial.print("Free Heap: ");
-  Serial.println(freeHeap);
+  logMessage("Free Heap: " + String(freeHeap), true);
 
   if (freeHeap < lowMemoryThreshold)
   {
-    Serial.println("WARNING: Low memory!");
+    logMessage("WARNING: Low memory!", true);
   }
 }
 
@@ -799,8 +822,18 @@ void drawUpdateProgress()
   display.setTextColor(PX_COLOR_WHITE);
   int startY = 10;
   display.setCursor(0, startY);
+
+  if (isUpdateSuccess)
+  {
+    display.println("Update successful!");
+    display.println("Rebooting...");
+    display.display();
+    delay(2000);
+    ESP.restart();
+    return;
+  }
+
   display.println(updatingTitle);
-  display.display();
 
   int progressX = (SCREEN_WIDTH - progressWidth) / 2;
   int progressY = 40;

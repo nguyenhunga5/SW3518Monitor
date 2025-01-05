@@ -1,7 +1,7 @@
 #ifndef DEFINES_H
 #define DEFINES_H
 
-#define FWVersion "1.0"
+#define FWVersion "1.1"
 #define kTimeToCheckTemperature 1000       // 1000ms
 #define kTimeToChangeFan 10000       // 10000ms
 #define kTimeToReadInformation 150        // 150ms

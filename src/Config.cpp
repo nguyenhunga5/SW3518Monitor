@@ -16,6 +16,16 @@ Config::Config()
         this->totalEnergy4 = 0.0;
         this->serverName = defaultName();
     }
+
+    button = new OneButton(SWITCH_BUTTON, true, true);
+    // button->set
+    button->attachClick([](void *scope)
+                                { ((Config *)scope)->buttonClicked(); }, this);
+    button->attachDoubleClick([](void *scope)
+                              { ((Config *)scope)->buttonDoubleClicked(); }, this);
+    button->attachLongPressStart([](void *scope)
+                                 { ((Config *)scope)->buttonLongPressed(); }, this);
+    button->setLongPressIntervalMs(10000);
 }
 
 Config::~Config()
@@ -178,4 +188,27 @@ void Config::setServerName(String name)
 String Config::getServerName()
 {
     return this->serverName;
+}
+
+void Config::buttonClicked()
+{
+    this->setState(!this->getState());
+    this->buttonClickedCallback();
+}
+
+void Config::buttonDoubleClicked()
+{
+    if (buttonDoubleClickedCallback) {
+        this->buttonDoubleClickedCallback();
+    }
+}
+
+void Config::buttonLongPressed()
+{
+    this->buttonLongPressedCallback();
+}
+
+void Config::loop()
+{
+    button->tick();
 }
