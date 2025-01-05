@@ -80,12 +80,34 @@ void tcaselect(uint8_t channel)
 }
 
 void buildServer();
+void setupFileManagement();
 void setupI2C();
 void updateSwitch();
 
 bool drawFunnyEmotion();
 void dimScreen();
 
+void buildWelcome();
+
+/**
+ * @brief Setup function for initializing the system.
+ * 
+ * This function performs the following tasks:
+ * - Initializes serial communication at 115200 baud rate.
+ * - Mounts the LittleFS filesystem and lists all files in the root directory.
+ * - Configures pin modes for switch and button.
+ * - Initializes the configuration object and updates the switch state.
+ * - Sets up ElegantOTA with auto-reboot disabled.
+ * - Scans for I2C devices and prints their addresses.
+ * - Configures the fan pin mode.
+ * - Calls setupI2C() to initialize I2C communication.
+ * - Adds default headers for CORS to the HTTP server.
+ * - Initializes the asynchronous web server and DNS server.
+ * - Sets up the WiFi manager with callbacks for AP mode and saving configuration.
+ * - Attempts to auto-connect to WiFi using the configured server name.
+ * - Initializes the emoticons object.
+ * - Sets up button click and long press callbacks to update switch state and reset WiFi settings, respectively.
+ */
 void setup()
 {
   Serial.begin(115200);
@@ -116,8 +138,7 @@ void setup()
   pinMode(SWITCH_BUTTON, INPUT);
 
   config = std::make_unique<Config>();
-  // Force update switch state
-  updateSwitch();
+  
   ElegantOTA.setAutoReboot(false);
   byte error, address;
   int nDevices;
@@ -160,6 +181,9 @@ void setup()
 
   setupI2C();
 
+  // Force update switch state
+  updateSwitch();
+
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -168,8 +192,18 @@ void setup()
   Serial.println("Building wifi manager");
   wm = std::make_unique<AsyncWiFiManager>(server.get(), dns.get());
 
-  wm->setSaveConfigCallback([&]()
-                            { buildServer(); });
+  wm->setAPCallback([](AsyncWiFiManager *wifiConfig) {
+    tcaselect(0);
+    display.clearDisplay();
+    display.setCursor(4, 10);
+    display.setTextSize(1);
+    display.setTextColor(PX_COLOR_WHITE);
+    display.println("WiFi Setup Mode");
+    display.println("Connect to:");
+    display.println(wifiConfig->getConfigPortalSSID());
+    display.println("to configure WiFi");
+    display.display();
+    delay(200); });
 
   bool res;
   res = wm->autoConnect(config->getServerName().c_str());
@@ -187,15 +221,19 @@ void setup()
   }
 
   emoticons = std::make_unique<Emoticons>();
-  config->buttonClickedCallback = []{
+  config->buttonClickedCallback = []
+  {
     updateSwitch();
-    logMessage("Button click");
   };
 
-  config->buttonLongPressedCallback = []{
-    wm->resetSettings();
+  config->buttonLongPressedCallback = [] {
     logMessage("Button Long Pressed!");
+    wm->resetSettings();
+    delay(200);
+    ESP.reset();
   };
+
+  buildWelcome();
 }
 
 void checkTemperature();
@@ -633,10 +671,12 @@ void buildServer()
                 request->send(200, "application/json", response);
                });
   */
-  // Start server
-  server->begin();
 
-  server->begin();
+  setupFileManagement();
+
+      // Start server
+  server -> begin();
+
   Serial.println("HTTP server started");
 
   webSocket.begin();
@@ -645,11 +685,11 @@ void buildServer()
 void setupDisplay() {
   // Init OLED display on bus number 0
   tcaselect(0);
-  #ifdef OLED_SSD1306
+#ifdef OLED_SSD1306
     display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS);
-  #else
+#else
     display.begin(SCREEN_ADDRESS, true);
-  #endif
+#endif
 }
 
 void setupI2C()
@@ -712,6 +752,25 @@ void logMessage(const String &message, bool sendToSerial)
 
 void updateSwitch()
 {
+
+  bool needDim = !config->getState();
+
+  if (needDim) {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(PX_COLOR_WHITE);
+    display.setCursor(4, 14);
+    display.println("Bye bye...");
+    display.display();
+    delay(1000);
+  }
+
+#ifdef OLED_SSD1306
+  display.dim(needDim);
+#else
+  display.setContrast(needDim ? 0 : 0x7F);
+#endif
+
   digitalWrite(SWITCH_PIN, config->getState());
   String stateStr = config->getState() ? "On" : "Off";
   logMessage("Update state to => " + stateStr);
@@ -719,6 +778,7 @@ void updateSwitch()
   {
     delay(150);
     setupDisplay();
+    buildWelcome();
   }
   
 }
@@ -848,4 +908,151 @@ void drawUpdateProgress()
   display.fillRect(progressX, progressY, progressWidth, progressHeight, PX_COLOR_BLACK);
   display.fillRect(progressX, progressY, progressValue, progressHeight, PX_COLOR_WHITE);
   display.display();
+}
+
+void buildWelcome() {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(PX_COLOR_WHITE);
+  display.setCursor(4, 14);
+  display.println("Hello from:\n NguyenHungA5!!!"); // I hope you keep this message ^^!!
+  display.display();
+  delay(2000);
+}
+
+void handleFileList(AsyncWebServerRequest *request) {
+  String path = "/";
+  if (request->hasParam("dir")) {
+    path = request->getParam("dir")->value();
+  }
+
+  Dir dir = LittleFS.openDir(path);
+  String output = "[";
+  String fileName = "";
+  while (dir.next()) {
+    File entry = dir.openFile("r");
+    fileName = String(entry.name());
+    if (fileName == "config.json") {
+      continue;
+    }
+
+    if (output != "[")
+    {
+      output += ',';
+    }
+    bool isDir = false;
+    output += "{\"type\":\"";
+    output += (isDir) ? "dir" : "file";
+    output += "\",\"name\":\"";
+    output += fileName;
+    output += "\"}";
+    entry.close();
+  }
+  output += "]";
+  request->send(200, "application/json", output);
+}
+
+void handleFileUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+  if (!index) {
+    if (!filename.startsWith("/")) {
+      filename = "/" + filename;
+    }
+
+    if (LittleFS.exists(filename))
+    {
+      LittleFS.remove(filename); // Remove the existing file if it exists
+    }
+
+    request->_tempFile = LittleFS.open(filename, "w");
+  }
+  if (len) {
+    request->_tempFile.write(data, len);
+  }
+  if (final) {
+    request->_tempFile.close();
+    request->send(200, "text/plain", "File Uploaded!");
+  }
+}
+
+void handleFileDelete(AsyncWebServerRequest *request) {
+  if (request->hasParam("file")) {
+    String path = request->getParam("file")->value();
+    if (path == "/") {
+      request->send(400, "text/plain", "Cannot delete root directory");
+      return;
+    }
+    if (!LittleFS.exists(path)) {
+      request->send(404, "text/plain", "File not found");
+      return;
+    }
+    LittleFS.remove(path);
+    request->send(200, "text/plain", "File deleted");
+  } else {
+    request->send(400, "text/plain", "File parameter missing");
+  }
+}
+
+void handleFileCreate(AsyncWebServerRequest *request) {
+  if (request->hasParam("file")) {
+    String path = request->getParam("file")->value();
+    if (path == "/") {
+      request->send(400, "text/plain", "Cannot create root directory");
+      return;
+    }
+    if (LittleFS.exists(path)) {
+      request->send(400, "text/plain", "File already exists");
+      return;
+    }
+    File file = LittleFS.open(path, "w");
+    if (file) {
+      file.close();
+      request->send(200, "text/plain", "File created");
+    } else {
+      request->send(500, "text/plain", "File creation failed");
+    }
+  } else {
+    request->send(400, "text/plain", "File parameter missing");
+  }
+}
+
+void handleFileRename(AsyncWebServerRequest *request) {
+  if (request->hasParam("from") && request->hasParam("to")) {
+    String from = request->getParam("from")->value();
+    String to = request->getParam("to")->value();
+    if (!LittleFS.exists(from)) {
+      request->send(404, "text/plain", "Source file not found");
+      return;
+    }
+    if (LittleFS.exists(to)) {
+      request->send(400, "text/plain", "Destination file already exists");
+      return;
+    }
+    if (LittleFS.rename(from, to)) {
+      request->send(200, "text/plain", "File renamed");
+    } else {
+      request->send(500, "text/plain", "File rename failed");
+    }
+  } else {
+    request->send(400, "text/plain", "Parameters missing");
+  }
+}
+
+void handleGetFileRequest(AsyncWebServerRequest *request) {
+  if (!request->hasParam("name")) {
+    request->send(400, "text/plain", "Parameters missing");
+    return;
+  }
+
+  request->send(LittleFS, request->getParam("name")->value(), "text/plain");
+}
+
+void setupFileManagement() {
+  server->on("/list", HTTP_GET, handleFileList);
+  server->on("/upload", HTTP_POST, [](AsyncWebServerRequest *request) {
+    request->send(200);
+  }, handleFileUpload);
+  server->on("/delete", HTTP_POST, handleFileDelete);
+  server->on("/create", HTTP_POST, handleFileCreate);
+  server->on("/rename", HTTP_POST, handleFileRename);
+  server->on("/view", handleGetFileRequest);
 }
