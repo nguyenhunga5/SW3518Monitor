@@ -1,0 +1,76 @@
+# SW3518 Monitor Project
+
+## Overview
+
+This project is designed to monitor and control the SW3518 fast charger chip using an Arduino. The system includes an OLED display for visual feedback and an I2C interface for communication with the SW3518 chip.
+
+## Features
+
+- Monitor charging voltage, current, and power.
+- Display fast charge protocol and temperature.
+- Control and configure the SW3518 chip via I2C.
+- Web-based interface for remote monitoring and control.
+- Emoticon editor for customizing display graphics.
+
+## Hardware
+### Schematics and PCB
+
+- **Schematics**: Detailed schematics of the project can be found in the `/docs` folder.
+  
+  ![Schematic](docs/Schematic.pdf)
+
+- **PCB Layout**: The PCB layout files are also available in the `/docs` folder for reference.
+
+### Components
+
+- **SW3518 Chip**: The main fast charger chip.
+- **Arduino**: The microcontroller used to interface with the SW3518.
+- **OLED Display**: Used to display information.
+- **I2C Interface**: For communication between the Arduino and the SW3518.
+
+### Connections
+
+- **I2C Port (SDA & SCL)**: Connects to the SW3518_I2Cs port in the schematic.
+- **Other Pins**: Refer to the schematic for additional connections.
+
+## Software
+
+### Libraries
+
+- **Adafruit_GFX**: For graphics on the OLED display.
+- **Adafruit_SSD1306**: For controlling the OLED display.
+- **LittleFS**: For file system operations.
+- **ArduinoJson**: For JSON parsing.
+- **ESPAsyncWiFiManager**: For WiFi management.
+- **ESPAsyncWebServer**: For the web server.
+- **ElegantOTA**: For over-the-air updates.
+
+### Setup
+
+1. **Clone the Repository**:
+   ```sh
+   git clone https://github.com/nguyenhunga5/SW3518Monitor.git
+   cd SW3518Monitor
+   ```
+2. Install PlatformIO: Follow the instructions on the [PlatformIO website.](https://platformio.org/install)
+3. Build and Upload:
+    ```
+    pio run --target upload
+    ```
+## Configuration
+- **platformio.ini**: Contains the build configuration.
+- **defines.h**: Contains various project-specific definitions.
+
+## Usage
+1. Power on the System: Ensure all connections are secure.
+2. Monitor the Display: The OLED will show real-time data.
+3. Access the Web Interface: Connect to the device's WiFi and navigate to the provided IP address.
+
+## License
+This project is licensed under the terms of the LICENSE file.
+
+## Contributing
+Contributions are welcome! Please fork the repository and submit a pull request.
+
+## Support
+For any issues or questions, please open an issue on the GitHub repository.
