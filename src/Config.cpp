@@ -2,6 +2,10 @@
 #include "LittleFS.h"
 #include <ArduinoJson.h>
 
+String defaultName() {
+    return String(kServerName) + "-" + String(ESP.getChipId());
+}
+
 Config::Config()
 {
     if (!loadConfig()) {
@@ -10,7 +14,18 @@ Config::Config()
         this->totalEnergy2 = 0.0;
         this->totalEnergy3 = 0.0;
         this->totalEnergy4 = 0.0;
+        this->serverName = defaultName();
     }
+
+    button = new OneButton(SWITCH_BUTTON, true, true);
+    // button->set
+    button->attachClick([](void *scope)
+                                { ((Config *)scope)->buttonClicked(); }, this);
+    button->attachDoubleClick([](void *scope)
+                              { ((Config *)scope)->buttonDoubleClicked(); }, this);
+    button->attachLongPressStart([](void *scope)
+                                 { ((Config *)scope)->buttonLongPressed(); }, this);
+    button->setLongPressIntervalMs(10000);
 }
 
 Config::~Config()
@@ -20,7 +35,7 @@ Config::~Config()
 
 void Config::saveConfig()
 {
-    Serial.println("Begin save configuration file");
+    // Serial.println("Begin save configuration file");
     // Create a JSON document to hold the configuration
     DynamicJsonDocument doc(256);
 
@@ -30,6 +45,7 @@ void Config::saveConfig()
     doc["totalEnergy2"] = this->totalEnergy2;
     doc["totalEnergy3"] = this->totalEnergy3;
     doc["totalEnergy4"] = this->totalEnergy4;
+    doc["serverName"] = this->serverName;
 
     // Open the configuration file in write mode
     File configFile = LittleFS.open(CONFIG_FILE, "w");
@@ -43,7 +59,7 @@ void Config::saveConfig()
     serializeJson(doc, configFile);
     configFile.close();
 
-    Serial.println("Save configuration file successfully");
+    // Serial.println("Save configuration file successfully");
 }
 
 bool Config::loadConfig()
@@ -74,17 +90,12 @@ bool Config::loadConfig()
         return false;
     }
 
-    // Retrieve values from JSON document
-    // doc["state"] = this->state;
-    // doc["totalEnergy1"] = this->totalEnergy1;
-    // doc["totalEnergy2"] = this->totalEnergy2;
-    // doc["totalEnergy3"] = this->totalEnergy3;
-    // doc["totalEnergy4"] = this->totalEnergy4;
     this->state = doc["state"].as<bool>();
     this->totalEnergy1 = doc["totalEnergy1"].as<float>();
     this->totalEnergy2 = doc["totalEnergy2"].as<float>();
     this->totalEnergy3 = doc["totalEnergy3"].as<float>();
     this->totalEnergy4 = doc["totalEnergy4"].as<float>();
+    this->serverName = doc["serverName"].isNull() ? defaultName() : doc["serverName"].as<String>();
 
     configFile.close();
     return true;
@@ -166,4 +177,38 @@ void Config::resetTotalEnergy(int port) {
 
 bool Config::getState() {
     return this->state;
+}
+
+void Config::setServerName(String name)
+{
+    this->serverName = name;
+    this->saveConfig();
+}
+
+String Config::getServerName()
+{
+    return this->serverName;
+}
+
+void Config::buttonClicked()
+{
+    this->setState(!this->getState());
+    this->buttonClickedCallback();
+}
+
+void Config::buttonDoubleClicked()
+{
+    if (buttonDoubleClickedCallback) {
+        this->buttonDoubleClickedCallback();
+    }
+}
+
+void Config::buttonLongPressed()
+{
+    this->buttonLongPressedCallback();
+}
+
+void Config::loop()
+{
+    button->tick();
 }

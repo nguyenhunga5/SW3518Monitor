@@ -26,7 +26,8 @@
         var ws;
 
         function initWebSocket() {
-            var gateway = `ws://${window.location.hostname}:81/ws`;
+            var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            var gateway = `${protocol}//${window.location.hostname}:81/ws`;
             ws = new WebSocket(gateway);
 
             ws.onopen = function () {

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Manager</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            width: 80%;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #fff;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        .file-list {
+            list-style: none;
+            padding: 0;
+        }
+        .file-list li {
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .file-list li:last-child {
+            border-bottom: none;
+        }
+        .file-actions button {
+            margin-left: 10px;
+            padding: 5px 10px;
+            border: none;
+            background-color: #007BFF;
+            color: #fff;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+        .file-actions button:hover {
+            background-color: #0056b3;
+        }
+        .file-content {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>File Manager</h1>
+        <ul class="file-list" id="fileList">
+            <!-- File items will be dynamically added here -->
+        </ul>
+        <div class="file-content" id="fileContent">
+            <!-- File content will be displayed here -->
+        </div>
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', (event) => {
+            fetchFileList();
+        });
+
+        function fetchFileList() {
+            fetch('/list')
+                .then(response => response.json())
+                .then(data => {
+                    const fileList = document.getElementById('fileList');
+                    fileList.innerHTML = '';
+                    data.forEach(file => {
+                        const fileItem = document.createElement('li');
+                        fileItem.innerHTML = `
+                            ${file.name}
+                            <div class="file-actions">
+                                <button onclick="viewFile('${file.name}')">View</button>
+                                <button onclick="deleteFile('${file.name}')">Delete</button>
+                                <button onclick="renameFile('${file.name}')">Rename</button>
+                            </div>
+                        `;
+                        fileList.appendChild(fileItem);
+                    });
+                });
+        }
+
+        function viewFile(fileName) {
+            fetch(`/view?name=${fileName}`)
+                .then(response => response.text())
+                .then(data => {
+                    const fileContent = document.getElementById('fileContent');
+                    fileContent.textContent = data;
+                });
+        }
+
+        function deleteFile(fileName) {
+            fetch('/delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ name: fileName })
+            }).then(response => {
+                if (response.ok) {
+                    fetchFileList();
+                }
+            });
+        }
+
+        function renameFile(fileName) {
+            const newFileName = prompt('Enter new name for the file:', fileName);
+            if (newFileName) {
+                fetch('/rename', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ oldName: fileName, newName: newFileName })
+                }).then(response => {
+                    if (response.ok) {
+                        fetchFileList();
+                    }
+                });
+            }
+        }
+
+        // Call fetchFileList on page load
+        fetchFileList();
+    </script>
+</body>
+</html>

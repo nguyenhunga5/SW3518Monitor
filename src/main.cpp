@@ -1,11 +1,9 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
-#include <Adafruit_SH1106.h>
 #include "LittleFS.h"
 #include <ArduinoJson.h>
 #include <ESPAsyncWiFiManager.h>
-#include <OneButton.h>
 #include <ESP8266mDNS.h>
 #include <Ticker.h>
 #include <ESPAsyncWebServer.h>
@@ -13,41 +11,63 @@
 #include <ESP8266WiFi.h>
 #include <DNSServer.h>
 #include <WebSocketsServer.h>
+#include <memory>
+#include <vector>
 
 #include "defines.h"
 #include "PortItem.h"
 #include "Config.h"
+#include "Emoticons.hpp"
 
-#define SCREEN_WIDTH 128 // OLED display width, in pixels
-#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+constexpr int SCREEN_WIDTH = 128; // OLED display width, in pixels
+constexpr int SCREEN_HEIGHT = 64; // OLED display height, in pixels
 
-#define OLED_RESET LED_BUILTIN // 4
-#define SCREEN_ADDRESS 0x3C    ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
+constexpr int TCAADDR = 0x70;
 
-#define TCAADDR 0x70
+constexpr int TEMPERATURE_SENSOR_PIN = A0; // The ESP8266 pin ADC0
+constexpr int SCREEN_ADDRESS = 0x3C;
 
-#define TEMPERATURE_SENSOR_PIN A0 // The ESP8266 pin ADC0
+#ifdef OLED_SSD1306
+#include <Adafruit_SSD1306.h>
+#define OLED_RESET -1 // Reset pin # (or -1 if sharing Arduino reset pin)
+#define PX_COLOR_WHITE SSD1306_WHITE
+#define PX_COLOR_BLACK SSD1306_BLACK
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+#else
+#include <Adafruit_SH110x.h>
+constexpr int OLED_RESET = LED_BUILTIN; // 4
+#define PX_COLOR_WHITE SH110X_WHITE
+#define PX_COLOR_BLACK SH110X_BLACK
+Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+#endif
 
-Adafruit_SH1106 display(OLED_RESET);
-
-AsyncWebServer *server;
+std::unique_ptr<AsyncWebServer> server = nullptr;
 // Create a WebSocket object
-WebSocketsServer webSocket = WebSocketsServer(81);
+WebSocketsServer webSocket(81);
 
-AsyncWiFiManager *wm = nullptr; // global wm instance
-DNSServer *dns;
+std::unique_ptr<AsyncWiFiManager> wm = nullptr; // global wm instance
+std::unique_ptr<DNSServer> dns = nullptr;
 
 // Create an array of ports (global variable)
-std::vector<PortItem *> ports;
+std::vector<std::unique_ptr<PortItem>> ports;
+
+// Create an array of emoticons
+std::unique_ptr<Emoticons> emoticons = nullptr;
 
 // Config
-Config *config = nullptr;
+std::unique_ptr<Config> config = nullptr;
 
 // Is updating
 bool isUpdating = false;
+bool isUpdateSuccess = false;
+int progressValue = 0;
+int progressWidth = 100;
+int progressHeight = 10;
+char updatingTitle[12] = "Updating...";
+void drawUpdateProgress();
 
 int fanSpeed = 0;
-
+float lastTemperature = 0;
 // Helper function for changing TCA output channel
 void tcaselect(uint8_t channel)
 {
@@ -60,9 +80,34 @@ void tcaselect(uint8_t channel)
 }
 
 void buildServer();
+void setupFileManagement();
 void setupI2C();
 void updateSwitch();
 
+bool drawFunnyEmotion();
+void dimScreen();
+
+void buildWelcome();
+
+/**
+ * @brief Setup function for initializing the system.
+ * 
+ * This function performs the following tasks:
+ * - Initializes serial communication at 115200 baud rate.
+ * - Mounts the LittleFS filesystem and lists all files in the root directory.
+ * - Configures pin modes for switch and button.
+ * - Initializes the configuration object and updates the switch state.
+ * - Sets up ElegantOTA with auto-reboot disabled.
+ * - Scans for I2C devices and prints their addresses.
+ * - Configures the fan pin mode.
+ * - Calls setupI2C() to initialize I2C communication.
+ * - Adds default headers for CORS to the HTTP server.
+ * - Initializes the asynchronous web server and DNS server.
+ * - Sets up the WiFi manager with callbacks for AP mode and saving configuration.
+ * - Attempts to auto-connect to WiFi using the configured server name.
+ * - Initializes the emoticons object.
+ * - Sets up button click and long press callbacks to update switch state and reset WiFi settings, respectively.
+ */
 void setup()
 {
   Serial.begin(115200);
@@ -85,15 +130,16 @@ void setup()
 
       file = root.openNextFile();
     }
+
+    root.close();
   }
 
   pinMode(SWITCH_PIN, OUTPUT);
   pinMode(SWITCH_BUTTON, INPUT);
 
-  config = new Config();
-  // Force update switch state
-  updateSwitch();
-
+  config = std::make_unique<Config>();
+  
+  ElegantOTA.setAutoReboot(false);
   byte error, address;
   int nDevices;
 
@@ -135,16 +181,32 @@ void setup()
 
   setupI2C();
 
-  server = new AsyncWebServer(80);
-  dns = new DNSServer();
-  Serial.println("Building wifi manager");
-  wm = new AsyncWiFiManager(server, dns);
+  // Force update switch state
+  updateSwitch();
 
-  wm->setSaveConfigCallback([&]()
-                            { buildServer(); });
+  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
+  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Content-Type");
+  server = std::make_unique<AsyncWebServer>(80);
+  dns = std::make_unique<DNSServer>();
+  Serial.println("Building wifi manager");
+  wm = std::make_unique<AsyncWiFiManager>(server.get(), dns.get());
+
+  wm->setAPCallback([](AsyncWiFiManager *wifiConfig) {
+    tcaselect(0);
+    display.clearDisplay();
+    display.setCursor(4, 10);
+    display.setTextSize(1);
+    display.setTextColor(PX_COLOR_WHITE);
+    display.println("WiFi Setup Mode");
+    display.println("Connect to:");
+    display.println(wifiConfig->getConfigPortalSSID());
+    display.println("to configure WiFi");
+    display.display();
+    delay(200); });
 
   bool res;
-  res = wm->autoConnect();
+  res = wm->autoConnect(config->getServerName().c_str());
 
   if (!res)
   {
@@ -157,10 +219,27 @@ void setup()
     Serial.println("connected...yeey :)");
     buildServer();
   }
+
+  emoticons = std::make_unique<Emoticons>();
+  config->buttonClickedCallback = []
+  {
+    updateSwitch();
+  };
+
+  config->buttonLongPressedCallback = [] {
+    logMessage("Button Long Pressed!");
+    wm->resetSettings();
+    delay(200);
+    ESP.reset();
+  };
+
+  buildWelcome();
 }
 
 void checkTemperature();
 void updatePortValues();
+
+void debugMemory();
 
 /**
  * @brief The main loop of the program.
@@ -176,11 +255,14 @@ void updatePortValues();
  */
 void loop()
 {
+  config->loop();
   static unsigned long lastUpdate = 0;
   if (millis() - lastUpdate > 1000)
   { // Update every second
     lastUpdate = millis();
+    drawUpdateProgress();
     updatePortValues();
+    debugMemory();
   }
 
   MDNS.update();
@@ -208,19 +290,23 @@ unsigned long lastScrollTime = 0;
 uint8_t pageTime = 0;
 void displayInfo()
 {
-  if (isUpdating) {
+  if (isUpdating || !digitalRead(SWITCH_BUTTON))
+  {
     return;
   }
 
   tcaselect(0);
   display.clearDisplay();
   display.setTextSize(1);
-  display.setTextColor(WHITE);
+  display.setTextColor(PX_COLOR_WHITE);
 
   // Header with scrolling text
   display.setCursor(0, 4);
   // I hope you do not remove my name
-  String headerText = "WS3518X " + String(FWVersion) + " by NguyenHungA5 IP: " + WiFi.localIP().toString() + "    "; // Extra spaces for smooth loop
+  String headerText = "SW3518X " + String(FWVersion);
+  headerText += " by NguyenHungA5 IP: " + WiFi.localIP().toString();
+  headerText += " | http://" + config->getServerName() + ".local";
+  headerText += "    "; // Extra spaces for smooth loop
 
   // Update scroll position every 200ms
   if (millis() - lastScrollTime > 200)
@@ -235,10 +321,28 @@ void displayInfo()
 
   // Create scrolling effect by showing a window of the text
   String displayText = headerText.substring(scrollPosition) + headerText.substring(0, scrollPosition);
-  display.println(displayText.substring(0, 21)); // Show only what fits on screen
+  display.print(displayText.substring(0, 15)); // Show only what fits on screen
+  display.setCursor(86, 4);
+  String tempStr = " |" + String(lastTemperature, 1) + "C";
+  display.println(tempStr);
 
   // Draw separator line
-  display.drawLine(0, 13, 128, 13, WHITE);
+  display.drawLine(0, 13, 128, 13, PX_COLOR_WHITE);
+
+  bool allPortsIdle = true;
+  for (const auto &port : ports)
+  {
+    if (port->current > 0.0)
+    {
+      allPortsIdle = false;
+      break;
+    }
+  }
+
+  if (allPortsIdle && drawFunnyEmotion())
+  {
+    return;
+  }
 
   // Port information
   for (int i = 0; i < 4; i++)
@@ -279,7 +383,7 @@ void displayInfo()
 
         // Check if the protocol text is too long
         if (protocolText.length() > 7)
-        { // Assuming 7 characters fit in the display
+        {                         // Assuming 7 characters fit in the display
           protocolText += "    "; // Extra spaces for smooth loop
           // Scroll the text
           static unsigned long lastScrollTime = 0;
@@ -330,7 +434,6 @@ void displayInfo()
   display.display();
 }
 
-float lastTemperature = 0;
 void checkTemperature()
 {
   static unsigned long lastChecktime = 0;
@@ -349,32 +452,35 @@ void checkTemperature()
   {
     return;
   }
-  
+
   lastChangeFanSpeed = currentTime;
 
   float percent = (lastTemperature - kMinTemperature) / (kMaxTemperature - kMinTemperature);
-    float totalPower = 0;
-    if (ports.size() == 4)
+  float totalPower = 0;
+  if (ports.size() == 4)
+  {
+    for (size_t i = 0; i < 4; i++)
     {
-      for (size_t i = 0; i < 4; i++)
+      if (ports[i]->isActive)
       {
-        if (ports[i]->isActive)
-        {
-          totalPower += ports[i]->getPower();
-        }
+        totalPower += ports[i]->getPower();
       }
-    } 
-    
-    float pPercent = (totalPower - kMinPower) / (kMaxPower - kMinPower); // kMaxPower is power max per port, so we just estimate total power
+    }
+  }
+
+  float pPercent = (totalPower - kMinPower) / (kMaxPower - kMinPower); // kMaxPower is power max per port, so we just estimate total power
 
   if (lastTemperature > kMinTemperature || pPercent > percent)
   {
     percent = max(pPercent, percent);
-    if (percent < 0.05) {
+    if (percent < 0.05)
+    {
       percent = 0.0;
     }
     fanSpeed = min((int)(percent * 250), 250);
-  } else {
+  }
+  else
+  {
     fanSpeed = 0;
   }
 
@@ -386,6 +492,7 @@ void onOTAStart()
   // Log when OTA has started
   Serial.println("OTA update started!");
   isUpdating = true;
+  isUpdateSuccess = false;
 }
 
 unsigned long ota_progress_millis = 0;
@@ -395,29 +502,9 @@ void onOTAProgress(size_t current, size_t final)
   if (millis() - ota_progress_millis > 1000)
   {
     ota_progress_millis = millis();
-    Serial.printf("OTA Progress Current: %u bytes, Final: %u bytes\n", current, final);
+    progressValue = map(current, 0, final, 0, progressWidth);
 
-    tcaselect(0);
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(WHITE);
-    int startY = 10;
-    display.setCursor(0, startY);
-    display.println("Updating...");
-
-    int progressWidth = 100;
-    int progressHeight = 10;
-    int progressX = (SCREEN_WIDTH - progressWidth) / 2;
-    int progressY = startY + 30;
-    int progressValue = map(current, 0, final, 0, progressWidth);
-
-    String processText = String(progressValue) + "%";
-    display.setCursor((SCREEN_WIDTH - processText.length()) / 2, startY + 20);
-    display.println(processText);
-
-    display.fillRect(progressX, progressY, progressWidth, progressHeight, BLACK);
-    display.fillRect(progressX, progressY, progressValue, progressHeight, WHITE);
-    display.display();
+    debugMemory();
   }
 }
 
@@ -427,10 +514,12 @@ void onOTAEnd(bool success)
   if (success)
   {
     Serial.println("OTA update finished successfully!");
+    isUpdateSuccess = true;
   }
   else
   {
     Serial.println("There was an error during OTA update!");
+    isUpdating = false;
   }
   // <Add your own code here>
 }
@@ -440,18 +529,20 @@ File uploadFile;
 void handleTextUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final);
 void buildServer()
 {
-  if (!MDNS.begin(kServerName))
+  if (!MDNS.begin(config->getServerName()))
   {
     Serial.println("Error setting up MDNS responder!");
   }
   else
   {
-    Serial.println("mDNS responder started");
+    logMessage("mDNS responder started", true);
+    String message = "You can access the web interface at http://" + config->getServerName() + ".local or http://" + WiFi.localIP().toString();
+    logMessage(message, true);
     // Add service to MDNS-SD
     MDNS.addService("http", "tcp", 80);
   }
 
-  ElegantOTA.begin(server);
+  ElegantOTA.begin(server.get());
 
   // ElegantOTA callbacks
   ElegantOTA.onStart(onOTAStart);
@@ -508,7 +599,8 @@ void buildServer()
              {
         StaticJsonDocument<128> doc;
         doc["firmware"] = FWVersion;
-        
+        doc["serverName"] = config->getServerName();
+
         String response;
         serializeJson(doc, response);
         request->send(200, "application/json", response); });
@@ -520,8 +612,7 @@ void buildServer()
 
         String response;
         serializeJson(doc, response);
-        request->send(200, "application/json", response);
-  });
+        request->send(200, "application/json", response); });
 
   server->on("/state", HTTP_POST, [](AsyncWebServerRequest *request)
              {
@@ -533,8 +624,7 @@ void buildServer()
         }
 
         updateSwitch();
-        request->send(200, "application/json", "State updated");
-  });
+        request->send(200, "application/json", "State updated"); });
 
   server->on("/reset_energy", HTTP_POST, [](AsyncWebServerRequest *request)
              {
@@ -544,20 +634,62 @@ void buildServer()
         request->send(200, "application/json", "State updated"); });
 
   server->on("/edit", HTTP_GET, [](AsyncWebServerRequest *request)
-             {
-        request->send(LittleFS, "/edit.html", "text/html");
-  });
+             { request->send(LittleFS, "/edit.html", "text/html"); });
 
   server->on("/edit_content", HTTP_GET, [](AsyncWebServerRequest *request)
              { request->send(LittleFS, "/index.html", "text/html"); });
 
   server->on("/edit", HTTP_POST, [](AsyncWebServerRequest *request)
              { request->send(200, "text/plain", "File written successfully"); }, handleTextUpload);
+  emoticons->addListener(server.get());
 
-  server->begin();
+  /*
+    // API to change server name
+    server->on("/serverName", HTTP_POST, [](AsyncWebServerRequest *request)
+               {
+                 if (request->hasArg("serverName"))
+                 {
+                   String newServerName = request->arg("serverName");
+                   config->setServerName(newServerName);
+                   MDNS.begin(newServerName.c_str());
+                   request->send(200, "application/json", "{\"status\":\"success\"}");
+                 }
+                 else
+                 {
+                   request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Missing serverName parameter\"}");
+                 }
+               });
+
+    // Serve the web form
+    server->on("/serverName", HTTP_GET, [](AsyncWebServerRequest *request)
+               {
+                StaticJsonDocument<128> doc;
+                doc["serverName"] = config->getServerName();
+
+                String response;
+                serializeJson(doc, response);
+                request->send(200, "application/json", response);
+               });
+  */
+
+  setupFileManagement();
+
+      // Start server
+  server -> begin();
+
   Serial.println("HTTP server started");
 
   webSocket.begin();
+}
+
+void setupDisplay() {
+  // Init OLED display on bus number 0
+  tcaselect(0);
+#ifdef OLED_SSD1306
+    display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS);
+#else
+    display.begin(SCREEN_ADDRESS, true);
+#endif
 }
 
 void setupI2C()
@@ -565,16 +697,14 @@ void setupI2C()
   // Start I2C communication with the Multiplexer
   Wire.begin();
 
-  // Init OLED display on bus number 0
-  tcaselect(0);
-  display.begin(SH1106_SWITCHCAPVCC, SCREEN_ADDRESS);
-
+  setupDisplay();
+  
   for (uint i = 0; i < 4; i++)
   {
     tcaselect(i + 1);
-    PortItem *item = new PortItem();
+    auto item = std::make_unique<PortItem>();
     item->update();
-    ports.push_back(item);
+    ports.push_back(std::move(item));
   }
 }
 
@@ -611,55 +741,318 @@ void notifyClients(String data)
   webSocket.broadcastTXT(data);
 }
 
-void logMessage(const String &message)
+void logMessage(const String &message, bool sendToSerial)
 {
   notifyClients(message); // Send message to all connected WebSocket clients
+  if (sendToSerial)
+  {
+    Serial.println(message); // Send message to the serial monitor
+  }
 }
 
-void updateSwitch() {
+void updateSwitch()
+{
+
+  bool needDim = !config->getState();
+
+  if (needDim) {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(PX_COLOR_WHITE);
+    display.setCursor(4, 14);
+    display.println("Bye bye...");
+    display.display();
+    delay(1000);
+  }
+
+#ifdef OLED_SSD1306
+  display.dim(needDim);
+#else
+  display.setContrast(needDim ? 0 : 0x7F);
+#endif
+
   digitalWrite(SWITCH_PIN, config->getState());
   String stateStr = config->getState() ? "On" : "Off";
   logMessage("Update state to => " + stateStr);
+  if (config->getState())
+  {
+    delay(150);
+    setupDisplay();
+    buildWelcome();
+  }
+  
 }
 
 // Handle large file upload
 void handleTextUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
 {
-    if (index == 0)
+  if (index == 0)
+  {
+    // First chunk of data, open the file
+    logMessage("Starting text upload");
+    if (LittleFS.exists("/index.html"))
     {
-      // First chunk of data, open the file
-      logMessage("Starting text upload");
-      if (LittleFS.exists("/index.html"))
-      {
-        LittleFS.remove("/index.html"); // Remove the existing file if it exists
-      }
-      uploadFile = LittleFS.open("/index.html", "w");
-      if (!uploadFile)
-      {
-        logMessage("Failed to open file for writing");
-        request->send(500, "text/plain", "Failed to open file for writing");
-        return;
-      }
+      LittleFS.remove("/index.html"); // Remove the existing file if it exists
     }
-
-    // Write the current chunk to the file
-    if (uploadFile)
+    uploadFile = LittleFS.open("/index.html", "w");
+    if (!uploadFile)
     {
-      uploadFile.write(data, len);
-      logMessage("Written " + String(len) + " bytes");
-    }
-    else
-    {
-      logMessage("File not open during write");
-    }
-
-    if (final)
-    {
-      // All chunks received
-      logMessage("Html upload complete");
-      if (uploadFile)
-      {
-        uploadFile.close();
-      }
+      logMessage("Failed to open file for writing");
+      request->send(500, "text/plain", "Failed to open file for writing");
+      return;
     }
   }
+
+  // Write the current chunk to the file
+  if (uploadFile)
+  {
+    uploadFile.write(data, len);
+    logMessage("Written " + String(len) + " bytes");
+  }
+  else
+  {
+    logMessage("File not open during write");
+  }
+
+  if (final)
+  {
+    // All chunks received
+    logMessage("Html upload complete");
+    if (uploadFile)
+    {
+      uploadFile.close();
+    }
+  }
+}
+
+File root = LittleFS.open("/*.emo", "r");
+bool drawFunnyEmotion()
+{
+
+  if (isUpdating)
+  {
+    return false;
+  }
+
+  static unsigned long lastDrawTime = 0;
+  if (millis() - lastDrawTime < 2000)
+  {
+    return true;
+  }
+  lastDrawTime = millis();
+  return emoticons->draw(&display, SCREEN_WIDTH, SCREEN_HEIGHT, PX_COLOR_WHITE, PX_COLOR_BLACK);
+}
+
+unsigned long lastActivityTime = 0;
+int screenBrightness = 255;
+void dimScreen()
+{
+  unsigned long currentTime = millis();
+  if (currentTime - lastActivityTime > 10000)
+  {
+    screenBrightness = max(screenBrightness - 25, 0);
+    // display.setContrast(screenBrightness);
+    // display.dim(screenBrightness);
+    lastActivityTime = currentTime;
+  }
+}
+
+const int lowMemoryThreshold = 2000; // Alert if free heap is below 2000 bytes
+void debugMemory()
+{
+  size_t freeHeap = ESP.getFreeHeap();
+  logMessage("Free Heap: " + String(freeHeap), true);
+
+  if (freeHeap < lowMemoryThreshold)
+  {
+    logMessage("WARNING: Low memory!", true);
+  }
+}
+
+void drawUpdateProgress()
+{
+  if (!isUpdating)
+  {
+    return;
+  }
+
+  tcaselect(0);
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(PX_COLOR_WHITE);
+  int startY = 10;
+  display.setCursor(0, startY);
+
+  if (isUpdateSuccess)
+  {
+    display.println("Update successful!");
+    display.println("Rebooting...");
+    display.display();
+    delay(2000);
+    ESP.restart();
+    return;
+  }
+
+  display.println(updatingTitle);
+
+  int progressX = (SCREEN_WIDTH - progressWidth) / 2;
+  int progressY = 40;
+
+  String processText = String(progressValue) + "%";
+  int16_t textX, textY = 0;
+  uint16_t textWidth, textHeight = 0;
+  display.getTextBounds(processText.c_str(), 0, 0, &textX, &textY, &textWidth, &textHeight);
+  display.setCursor((SCREEN_WIDTH - textWidth) / 2, startY + 20);
+  display.println(processText);
+
+  display.fillRect(progressX, progressY, progressWidth, progressHeight, PX_COLOR_BLACK);
+  display.fillRect(progressX, progressY, progressValue, progressHeight, PX_COLOR_WHITE);
+  display.display();
+}
+
+void buildWelcome() {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(PX_COLOR_WHITE);
+  display.setCursor(4, 14);
+  display.println("Hello from:\n NguyenHungA5!!!"); // I hope you keep this message ^^!!
+  display.display();
+  delay(2000);
+}
+
+void handleFileList(AsyncWebServerRequest *request) {
+  String path = "/";
+  if (request->hasParam("dir")) {
+    path = request->getParam("dir")->value();
+  }
+
+  Dir dir = LittleFS.openDir(path);
+  String output = "[";
+  String fileName = "";
+  while (dir.next()) {
+    File entry = dir.openFile("r");
+    fileName = String(entry.name());
+    if (fileName == "config.json") {
+      continue;
+    }
+
+    if (output != "[")
+    {
+      output += ',';
+    }
+    bool isDir = false;
+    output += "{\"type\":\"";
+    output += (isDir) ? "dir" : "file";
+    output += "\",\"name\":\"";
+    output += fileName;
+    output += "\"}";
+    entry.close();
+  }
+  output += "]";
+  request->send(200, "application/json", output);
+}
+
+void handleFileUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+  if (!index) {
+    if (!filename.startsWith("/")) {
+      filename = "/" + filename;
+    }
+
+    if (LittleFS.exists(filename))
+    {
+      LittleFS.remove(filename); // Remove the existing file if it exists
+    }
+
+    request->_tempFile = LittleFS.open(filename, "w");
+  }
+  if (len) {
+    request->_tempFile.write(data, len);
+  }
+  if (final) {
+    request->_tempFile.close();
+    request->send(200, "text/plain", "File Uploaded!");
+  }
+}
+
+void handleFileDelete(AsyncWebServerRequest *request) {
+  if (request->hasParam("file")) {
+    String path = request->getParam("file")->value();
+    if (path == "/") {
+      request->send(400, "text/plain", "Cannot delete root directory");
+      return;
+    }
+    if (!LittleFS.exists(path)) {
+      request->send(404, "text/plain", "File not found");
+      return;
+    }
+    LittleFS.remove(path);
+    request->send(200, "text/plain", "File deleted");
+  } else {
+    request->send(400, "text/plain", "File parameter missing");
+  }
+}
+
+void handleFileCreate(AsyncWebServerRequest *request) {
+  if (request->hasParam("file")) {
+    String path = request->getParam("file")->value();
+    if (path == "/") {
+      request->send(400, "text/plain", "Cannot create root directory");
+      return;
+    }
+    if (LittleFS.exists(path)) {
+      request->send(400, "text/plain", "File already exists");
+      return;
+    }
+    File file = LittleFS.open(path, "w");
+    if (file) {
+      file.close();
+      request->send(200, "text/plain", "File created");
+    } else {
+      request->send(500, "text/plain", "File creation failed");
+    }
+  } else {
+    request->send(400, "text/plain", "File parameter missing");
+  }
+}
+
+void handleFileRename(AsyncWebServerRequest *request) {
+  if (request->hasParam("from") && request->hasParam("to")) {
+    String from = request->getParam("from")->value();
+    String to = request->getParam("to")->value();
+    if (!LittleFS.exists(from)) {
+      request->send(404, "text/plain", "Source file not found");
+      return;
+    }
+    if (LittleFS.exists(to)) {
+      request->send(400, "text/plain", "Destination file already exists");
+      return;
+    }
+    if (LittleFS.rename(from, to)) {
+      request->send(200, "text/plain", "File renamed");
+    } else {
+      request->send(500, "text/plain", "File rename failed");
+    }
+  } else {
+    request->send(400, "text/plain", "Parameters missing");
+  }
+}
+
+void handleGetFileRequest(AsyncWebServerRequest *request) {
+  if (!request->hasParam("name")) {
+    request->send(400, "text/plain", "Parameters missing");
+    return;
+  }
+
+  request->send(LittleFS, request->getParam("name")->value(), "text/plain");
+}
+
+void setupFileManagement() {
+  server->on("/list", HTTP_GET, handleFileList);
+  server->on("/upload", HTTP_POST, [](AsyncWebServerRequest *request) {
+    request->send(200);
+  }, handleFileUpload);
+  server->on("/delete", HTTP_POST, handleFileDelete);
+  server->on("/create", HTTP_POST, handleFileCreate);
+  server->on("/rename", HTTP_POST, handleFileRename);
+  server->on("/view", handleGetFileRequest);
+}

@@ -75,7 +75,7 @@ public:
   ~SW35xx();
   void begin();
   /**
-   * @brief 读取当前充电状态
+   * @brief Read the current charging status
    * 
    */
   void readStatus(const bool useADCDataBuffer=false);
@@ -84,13 +84,13 @@ public:
    */
   float readTemperature(const bool useADCDataBuffer=false);
   /**
-   * @brief 发送PD命令
+   * @brief Send PD command
    * 
-   * @note 这个芯片似乎可以发送很多种PD命令，但是寄存器文档里只有hardreset. 如果你有PD抓包工具，可以尝试2~15的不同参数，摸索出对应的命令。记得开个pr告诉我!
+   * @note This chip seems to be able to send many types of PD commands, but the register documentation only mentions hardreset. If you have a PD sniffer tool, you can try different parameters from 2 to 15 to explore the corresponding commands. Remember to open a PR to tell me!
    */
   void sendPDCmd(PDCmd_t cmd);
   /**
-   * @brief 重新广播PDO. 改变最大电流后需要调用此函数或者重新插拔USB线来让设置生效.
+   * @brief Rebroadcast PDO. After changing the maximum current, you need to call this function or replug the USB cable to make the settings take effect.
    */
   void rebroadcastPDO();
   /**
@@ -100,61 +100,61 @@ public:
   void setQuickChargeConfiguration(const uint16_t flags,
       const enum QuickChargePowerClass power);
   /**
-   * @brief 把PD所有组别的电流设置成5A. 如果你的芯片不是sw3518s请慎重使用
+   * @brief Set the maximum output current of all PD groups to 5A. Use with caution if your chip is not sw3518s
    */
   void setMaxCurrent5A();
    /**
-   * @brief 设置固定电压组别的最大输出电流
+   * @brief Set the maximum output current of fixed voltage groups
    * 
-   * @param ma_xx 各组别的最大输出电流,单位毫安,最小分度50ma,设为0则关闭
-   * @note 5v无法关闭
+   * @param ma_xx Maximum output current of each group in mA, minimum step is 50mA, set to 0 to disable
+   * @note 5V cannot be disabled
    */
   void setMaxCurrentsFixed(uint32_t ma_5v, uint32_t ma_9v, uint32_t ma_12v, uint32_t ma_15v, uint32_t ma_20v);
   /**
-   * @brief 设置PPS组别的最大输出电流
+   * @brief Set the maximum output current of PPS groups
    * 
-   * @param ma_xxx 各组别最大输出电流,单位毫安,最小分度50ma,设为0则关闭
-   * @note 注意 PD 配置的最大功率大于 60W 时, pps1 将不会广播 (TODO:datasheet这么写的，没试过)
-   *       pps1 的最高电压需要大于 pps0 的最高电压，否则 pps1 不会广播;
+   * @param ma_xxx Maximum output current of each group in mA, minimum step is 50mA, set to 0 to disable
+   * @note Note that when the maximum power configured by PD is greater than 60W, pps1 will not be broadcast (TODO: the datasheet says so, but I haven't tried it)
+   *       The maximum voltage of pps1 needs to be greater than that of pps0, otherwise pps1 will not be broadcast;
    */
   void setMaxCurrentsPPS(uint32_t ma_pps1, uint32_t ma_pps2);
   /**
-  //  * @brief 重置最大输出电流
+  //  * @brief Reset the maximum output current
   //  * 
-  //  * @note 20v组别的电流不会被重置
+  //  * @note The current of the 20V group will not be reset
   //  */
   // void resetMaxCurrents();
   // /**
-  //  * @brief 启用Emarker检测
+  //  * @brief Enable Emarker detection
   //  */
   // void enableEmarker();
   // /**
-  //  * @brief 禁用Emarker检测
+  //  * @brief Disable Emarker detection
   //  */
   // void disableEmarker();
 public:
   /**
-   * @brief 输入电压
+   * @brief Input voltage
    */
   uint16_t vin_mV;
   /**
-   * @brief 输出电压
+   * @brief Output voltage
    */
   uint16_t vout_mV;
   /**
-   * @brief 输出电流1(type-C)
+   * @brief Output current 1 (type-C)
    */
   uint16_t iout_usbc_mA;
   /**
-   * @brief 输出电流2(type-A)
+   * @brief Output current 2 (type-A)
    */
   uint16_t iout_usba_mA;
   /**
-   * @brief 快充协议
+   * @brief Fast charge protocol
    */
   enum fastChargeType_t fastChargeType;
   /**
-   * @brief PD版本(2或者3)
+   * @brief PD version (2 or 3)
    */
   uint8_t PDVersion;
 
