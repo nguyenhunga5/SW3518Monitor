@@ -56,6 +56,7 @@ std::unique_ptr<Emoticons> emoticons = nullptr;
 
 // Config
 std::unique_ptr<Config> config = nullptr;
+bool needUpdateState = false;
 
 // Is updating
 bool isUpdating = false;
@@ -223,7 +224,7 @@ void setup()
   emoticons = std::make_unique<Emoticons>();
   config->buttonClickedCallback = []
   {
-    updateSwitch();
+    needUpdateState = true;
   };
 
   config->buttonLongPressedCallback = [] {
@@ -263,6 +264,12 @@ void loop()
     drawUpdateProgress();
     updatePortValues();
     debugMemory();
+  }
+
+  if (needUpdateState)
+  {
+    needUpdateState = false;
+    updateSwitch();
   }
 
   MDNS.update();
@@ -623,7 +630,7 @@ void buildServer()
           config->setState(false);
         }
 
-        updateSwitch();
+        needUpdateState = true;
         request->send(200, "application/json", "State updated"); });
 
   server->on("/reset_energy", HTTP_POST, [](AsyncWebServerRequest *request)
@@ -829,7 +836,7 @@ File root = LittleFS.open("/*.emo", "r");
 bool drawFunnyEmotion()
 {
 
-  if (isUpdating)
+  if (isUpdating || !config->getState())
   {
     return false;
   }
