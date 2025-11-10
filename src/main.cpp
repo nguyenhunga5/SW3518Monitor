@@ -92,7 +92,7 @@ void buildWelcome();
 
 /**
  * @brief Setup function for initializing the system.
- * 
+ *
  * This function performs the following tasks:
  * - Initializes serial communication at 115200 baud rate.
  * - Mounts the LittleFS filesystem and lists all files in the root directory.
@@ -139,7 +139,7 @@ void setup()
   pinMode(SWITCH_BUTTON, INPUT);
 
   config = std::make_unique<Config>();
-  
+
   ElegantOTA.setAutoReboot(false);
   byte error, address;
   int nDevices;
@@ -193,7 +193,8 @@ void setup()
   Serial.println("Building wifi manager");
   wm = std::make_unique<AsyncWiFiManager>(server.get(), dns.get());
 
-  wm->setAPCallback([](AsyncWiFiManager *wifiConfig) {
+  wm->setAPCallback([](AsyncWiFiManager *wifiConfig)
+                    {
     tcaselect(0);
     display.clearDisplay();
     display.setCursor(4, 10);
@@ -227,7 +228,8 @@ void setup()
     needUpdateState = true;
   };
 
-  config->buttonLongPressedCallback = [] {
+  config->buttonLongPressedCallback = []
+  {
     logMessage("Button Long Pressed!");
     wm->resetSettings();
     delay(200);
@@ -278,16 +280,48 @@ void loop()
   webSocket.loop();
 }
 
-// Ref: https://esp8266tutorials.blogspot.com/2016/09/esp8266-ntc-temperature-thermistor.html
-unsigned int Rs = 157000;
-double Vcc = 3.3;
+// Actual circuit: 3.3V -> 150k -> ADC -> NTC -> 10k -> GND
+// The NTC is in series with a 10k resistor to GND, and 150k resistor to Vcc
+// Adjust Steinhart-Hart coefficients based on your specific NTC thermistor datasheet
+const double R_upper = 150000.0; // Upper resistor (Vcc to ADC) in ohms
+const double R_lower = 10000.0;  // Lower resistor (ADC to GND) in ohms
+const double Vcc = 3.3;          // Supply voltage
+
 double Thermister(int val)
 {
-  double V_NTC = (double)val / 1024;
-  double R_NTC = (Rs * V_NTC) / (Vcc - V_NTC);
-  R_NTC = log(R_NTC);
-  double Temp = 1 / (0.001129148 + (0.000234125 + (0.0000000876741 * R_NTC * R_NTC)) * R_NTC);
+  // ESP8266 ADC is 10-bit: 0-1023
+  // Calculate actual voltage at ADC pin
+  double V_ADC = ((double)val / 1023.0) * Vcc;
+
+  // Circuit analysis: 3.3V -> 150k -> ADC -> (NTC + 10k in series) -> GND
+  // V_ADC = Vcc * (R_NTC + R_lower) / (R_upper + R_NTC + R_lower)
+  // Solving for R_NTC:
+  // V_ADC * (R_upper + R_NTC + R_lower) = Vcc * (R_NTC + R_lower)
+  // V_ADC * R_upper + V_ADC * R_NTC + V_ADC * R_lower = Vcc * R_NTC + Vcc * R_lower
+  // V_ADC * R_upper + V_ADC * R_lower - Vcc * R_lower = R_NTC * (Vcc - V_ADC)
+  // R_NTC = (V_ADC * R_upper + (V_ADC - Vcc) * R_lower) / (Vcc - V_ADC)
+
+  if (V_ADC >= Vcc)
+  {
+    return -273.15; // Invalid reading
+  }
+
+  double R_NTC = (V_ADC * R_upper + (V_ADC - Vcc) * R_lower) / (Vcc - V_ADC);
+
+  // Prevent negative resistance (invalid reading)
+  if (R_NTC <= 0)
+  {
+    return -273.15;
+  }
+
+  // Steinhart-Hart equation: 1/T = A + B*ln(R) + C*ln(R)^3
+  // Generic coefficients for 10k NTC thermistor - replace with your NTC's specific values
+  double ln_R = log(R_NTC);
+  double Temp = 1.0 / (0.001129148 + (0.000234125 * ln_R) + (0.0000000876741 * ln_R * ln_R * ln_R));
+
+  // Convert from Kelvin to Celsius
   Temp = Temp - 273.15;
+
   return Temp;
 }
 
@@ -452,7 +486,17 @@ void checkTemperature()
   }
 
   lastChecktime = currentTime;
-  lastTemperature = Thermister(analogRead(TEMPERATURE_SENSOR_PIN));
+
+  // Read ADC 10 times and calculate average for more stable readings
+  int adcSum = 0;
+  for (int i = 0; i < 10; i++)
+  {
+    adcSum += analogRead(TEMPERATURE_SENSOR_PIN);
+    delay(1); // Small delay between readings
+  }
+  int avgADC = adcSum / 10;
+
+  lastTemperature = Thermister(avgADC);
   displayInfo();
 
   if (currentTime - lastChangeFanSpeed < kTimeToChangeFan)
@@ -491,7 +535,11 @@ void checkTemperature()
     fanSpeed = 0;
   }
 
+#ifdef REVERSE_FAN_PWM
+  analogWrite(FAN_PIN, 255 - fanSpeed);
+#else
   analogWrite(FAN_PIN, fanSpeed);
+#endif
 }
 
 void onOTAStart()
@@ -681,21 +729,22 @@ void buildServer()
 
   setupFileManagement();
 
-      // Start server
-  server -> begin();
+  // Start server
+  server->begin();
 
   Serial.println("HTTP server started");
 
   webSocket.begin();
 }
 
-void setupDisplay() {
+void setupDisplay()
+{
   // Init OLED display on bus number 0
   tcaselect(0);
 #ifdef OLED_SSD1306
-    display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS);
+  display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS);
 #else
-    display.begin(SCREEN_ADDRESS, true);
+  display.begin(SCREEN_ADDRESS, true);
 #endif
 }
 
@@ -705,7 +754,7 @@ void setupI2C()
   Wire.begin();
 
   setupDisplay();
-  
+
   for (uint i = 0; i < 4; i++)
   {
     tcaselect(i + 1);
@@ -762,7 +811,8 @@ void updateSwitch()
 
   bool needDim = !config->getState();
 
-  if (needDim) {
+  if (needDim)
+  {
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(PX_COLOR_WHITE);
@@ -787,7 +837,6 @@ void updateSwitch()
     setupDisplay();
     buildWelcome();
   }
-  
 }
 
 // Handle large file upload
@@ -917,7 +966,8 @@ void drawUpdateProgress()
   display.display();
 }
 
-void buildWelcome() {
+void buildWelcome()
+{
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(PX_COLOR_WHITE);
@@ -927,19 +977,23 @@ void buildWelcome() {
   delay(2000);
 }
 
-void handleFileList(AsyncWebServerRequest *request) {
+void handleFileList(AsyncWebServerRequest *request)
+{
   String path = "/";
-  if (request->hasParam("dir")) {
+  if (request->hasParam("dir"))
+  {
     path = request->getParam("dir")->value();
   }
 
   Dir dir = LittleFS.openDir(path);
   String output = "[";
   String fileName = "";
-  while (dir.next()) {
+  while (dir.next())
+  {
     File entry = dir.openFile("r");
     fileName = String(entry.name());
-    if (fileName == "config.json") {
+    if (fileName == "config.json")
+    {
       continue;
     }
 
@@ -959,9 +1013,12 @@ void handleFileList(AsyncWebServerRequest *request) {
   request->send(200, "application/json", output);
 }
 
-void handleFileUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
-  if (!index) {
-    if (!filename.startsWith("/")) {
+void handleFileUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
+{
+  if (!index)
+  {
+    if (!filename.startsWith("/"))
+    {
       filename = "/" + filename;
     }
 
@@ -972,80 +1029,108 @@ void handleFileUpload(AsyncWebServerRequest *request, String filename, size_t in
 
     request->_tempFile = LittleFS.open(filename, "w");
   }
-  if (len) {
+  if (len)
+  {
     request->_tempFile.write(data, len);
   }
-  if (final) {
+  if (final)
+  {
     request->_tempFile.close();
     request->send(200, "text/plain", "File Uploaded!");
   }
 }
 
-void handleFileDelete(AsyncWebServerRequest *request) {
-  if (request->hasParam("file")) {
+void handleFileDelete(AsyncWebServerRequest *request)
+{
+  if (request->hasParam("file"))
+  {
     String path = request->getParam("file")->value();
-    if (path == "/") {
+    if (path == "/")
+    {
       request->send(400, "text/plain", "Cannot delete root directory");
       return;
     }
-    if (!LittleFS.exists(path)) {
+    if (!LittleFS.exists(path))
+    {
       request->send(404, "text/plain", "File not found");
       return;
     }
     LittleFS.remove(path);
     request->send(200, "text/plain", "File deleted");
-  } else {
+  }
+  else
+  {
     request->send(400, "text/plain", "File parameter missing");
   }
 }
 
-void handleFileCreate(AsyncWebServerRequest *request) {
-  if (request->hasParam("file")) {
+void handleFileCreate(AsyncWebServerRequest *request)
+{
+  if (request->hasParam("file"))
+  {
     String path = request->getParam("file")->value();
-    if (path == "/") {
+    if (path == "/")
+    {
       request->send(400, "text/plain", "Cannot create root directory");
       return;
     }
-    if (LittleFS.exists(path)) {
+    if (LittleFS.exists(path))
+    {
       request->send(400, "text/plain", "File already exists");
       return;
     }
     File file = LittleFS.open(path, "w");
-    if (file) {
+    if (file)
+    {
       file.close();
       request->send(200, "text/plain", "File created");
-    } else {
+    }
+    else
+    {
       request->send(500, "text/plain", "File creation failed");
     }
-  } else {
+  }
+  else
+  {
     request->send(400, "text/plain", "File parameter missing");
   }
 }
 
-void handleFileRename(AsyncWebServerRequest *request) {
-  if (request->hasParam("from") && request->hasParam("to")) {
+void handleFileRename(AsyncWebServerRequest *request)
+{
+  if (request->hasParam("from") && request->hasParam("to"))
+  {
     String from = request->getParam("from")->value();
     String to = request->getParam("to")->value();
-    if (!LittleFS.exists(from)) {
+    if (!LittleFS.exists(from))
+    {
       request->send(404, "text/plain", "Source file not found");
       return;
     }
-    if (LittleFS.exists(to)) {
+    if (LittleFS.exists(to))
+    {
       request->send(400, "text/plain", "Destination file already exists");
       return;
     }
-    if (LittleFS.rename(from, to)) {
+    if (LittleFS.rename(from, to))
+    {
       request->send(200, "text/plain", "File renamed");
-    } else {
+    }
+    else
+    {
       request->send(500, "text/plain", "File rename failed");
     }
-  } else {
+  }
+  else
+  {
     request->send(400, "text/plain", "Parameters missing");
   }
 }
 
-void handleGetFileRequest(AsyncWebServerRequest *request) {
-  if (!request->hasParam("name")) {
+void handleGetFileRequest(AsyncWebServerRequest *request)
+{
+  if (!request->hasParam("name"))
+  {
     request->send(400, "text/plain", "Parameters missing");
     return;
   }
@@ -1053,11 +1138,11 @@ void handleGetFileRequest(AsyncWebServerRequest *request) {
   request->send(LittleFS, request->getParam("name")->value(), "text/plain");
 }
 
-void setupFileManagement() {
+void setupFileManagement()
+{
   server->on("/list", HTTP_GET, handleFileList);
-  server->on("/upload", HTTP_POST, [](AsyncWebServerRequest *request) {
-    request->send(200);
-  }, handleFileUpload);
+  server->on("/upload", HTTP_POST, [](AsyncWebServerRequest *request)
+             { request->send(200); }, handleFileUpload);
   server->on("/delete", HTTP_POST, handleFileDelete);
   server->on("/create", HTTP_POST, handleFileCreate);
   server->on("/rename", HTTP_POST, handleFileRename);
